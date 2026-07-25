@@ -1,0 +1,19 @@
+# === C++ Build ===
+ai_engine/build/
+
+# === Node.js ===
+server/node_modules/
+server/db/smart_plant.db
+
+# === Environment ===
+server/.env
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+.DS_Store
+Thumbs.db

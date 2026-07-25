@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Smart Plant Dashboard - Giám sát khu vườn thông minh trên Raspberry Pi 4">
+  <title>🌱 Smart Plant Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">🌱</span>
+        <div>
+          <h1>Smart Plant</h1>
+          <p class="subtitle">Raspberry Pi 4 Dashboard</p>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-indicator" id="connection-status">
+        <span class="status-dot"></span>
+        <span class="status-text">Đang kết nối...</span>
+      </div>
+      <div class="clock" id="clock"></div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Sensor Cards Section -->
+    <section class="section" id="sensor-section">
+      <div class="section-header">
+        <h2>📡 Cảm biến thời gian thực</h2>
+        <span class="refresh-badge" id="last-updated">Cập nhật: --</span>
+      </div>
+      <div class="sensor-cards" id="sensor-cards">
+        <div class="sensor-card temperature" id="card-temp">
+          <div class="card-icon">🌡️</div>
+          <div class="card-info">
+            <span class="card-label">Nhiệt độ</span>
+            <span class="card-value" id="val-temp">--</span>
+            <span class="card-unit">°C</span>
+          </div>
+          <div class="card-bar">
+            <div class="card-bar-fill" id="bar-temp" style="width: 0%"></div>
+          </div>
+          <span class="card-range">Phạm vi: 15 - 45°C</span>
+        </div>
+
+        <div class="sensor-card humidity" id="card-humidity">
+          <div class="card-icon">💧</div>
+          <div class="card-info">
+            <span class="card-label">Độ ẩm không khí</span>
+            <span class="card-value" id="val-humidity">--</span>
+            <span class="card-unit">%</span>
+          </div>
+          <div class="card-bar">
+            <div class="card-bar-fill" id="bar-humidity" style="width: 0%"></div>
+          </div>
+          <span class="card-range">Phạm vi: 0 - 100%</span>
+        </div>
+
+        <div class="sensor-card light" id="card-light">
+          <div class="card-icon">☀️</div>
+          <div class="card-info">
+            <span class="card-label">Ánh sáng</span>
+            <span class="card-value" id="val-light">--</span>
+            <span class="card-unit">lux</span>
+          </div>
+          <div class="card-bar">
+            <div class="card-bar-fill" id="bar-light" style="width: 0%"></div>
+          </div>
+          <span class="card-range">Phạm vi: 0 - 100,000 lux</span>
+        </div>
+
+        <div class="sensor-card soil" id="card-soil">
+          <div class="card-icon">🌱</div>
+          <div class="card-info">
+            <span class="card-label">Độ ẩm đất</span>
+            <span class="card-value" id="val-soil">--</span>
+            <span class="card-unit">%</span>
+          </div>
+          <div class="card-bar">
+            <div class="card-bar-fill" id="bar-soil" style="width: 0%"></div>
+          </div>
+          <span class="card-range">Phạm vi: 0 - 100%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts Section -->
+    <section class="section" id="chart-section">
+      <div class="section-header">
+        <h2>📈 Biểu đồ 24 giờ</h2>
+        <div class="chart-controls">
+          <button class="btn btn-sm active" data-hours="6">6h</button>
+          <button class="btn btn-sm" data-hours="12">12h</button>
+          <button class="btn btn-sm" data-hours="24">24h</button>
+        </div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-container">
+          <canvas id="chart-temp-humidity"></canvas>
+        </div>
+        <div class="chart-container">
+          <canvas id="chart-light-soil"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pest Detection Section -->
+    <section class="section" id="pest-section">
+      <div class="section-header">
+        <h2>🔬 Phát hiện sâu bệnh</h2>
+        <div class="pest-stats" id="pest-stats">
+          <span class="pest-stat critical">
+            <span class="pest-stat-count" id="pest-critical">0</span> Nghiêm trọng
+          </span>
+          <span class="pest-stat high">
+            <span class="pest-stat-count" id="pest-high">0</span> Cao
+          </span>
+          <span class="pest-stat medium">
+            <span class="pest-stat-count" id="pest-medium">0</span> Trung bình
+          </span>
+        </div>
+      </div>
+      <div class="pest-list" id="pest-list">
+        <div class="loading-skeleton">
+          <div class="skeleton-line"></div>
+          <div class="skeleton-line short"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zone Overview Section -->
+    <section class="section" id="zone-section">
+      <div class="section-header">
+        <h2>🗺️ Tổng quan khu vực</h2>
+      </div>
+      <div class="zone-grid" id="zone-grid">
+        <div class="loading-skeleton">
+          <div class="skeleton-line"></div>
+          <div class="skeleton-line short"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>🌱 Smart Plant Dashboard • Raspberry Pi 4 • <span id="footer-year"></span></p>
+  </footer>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
