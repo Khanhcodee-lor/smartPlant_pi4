@@ -1,19 +1,20 @@
 # === C++ Build ===
 ai_engine/build/
 
-# === Node.js ===
+# === Node.js & Database ===
 server/node_modules/
-server/db/smart_plant.db
+server/db/smart_plant.db*
+*.db
+*.db-wal
+*.db-shm
 
 # === Environment ===
 server/.env
 
-# === IDE ===
+# === IDE & OS ===
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# === OS ===
 .DS_Store
 Thumbs.db
