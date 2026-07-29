@@ -4,6 +4,7 @@ ai_engine/build_aarch64/
 
 # === Node.js & Database ===
 server/node_modules/
+client/node_modules/
 server/db/smart_plant.db*
 *.db
 *.db-wal
@@ -25,3 +26,4 @@ deploy.sh
 
 # === Build Artifacts ===
 server/dist/
+client/dist/
