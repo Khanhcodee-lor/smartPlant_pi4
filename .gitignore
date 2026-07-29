@@ -1,5 +1,6 @@
 # === C++ Build ===
 ai_engine/build/
+ai_engine/build_aarch64/
 
 # === Node.js & Database ===
 server/node_modules/
@@ -18,3 +19,9 @@ server/.env
 *.swo
 .DS_Store
 Thumbs.db
+
+# === Scripts ===
+deploy.sh
+
+# === Build Artifacts ===
+server/dist/

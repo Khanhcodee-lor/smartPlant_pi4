@@ -49,25 +49,38 @@ std::string current_time_str() {
  * Cấu trúc: ai_engine/build/smart_plant_engine → ../server/
  */
 std::string find_server_dir() {
-    // Đọc đường dẫn executable
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len <= 0) {
-        return "";
+        return "../server";
     }
     exe_path[len] = '\0';
 
-    std::string path(exe_path);
-    // Bỏ /build/smart_plant_engine → lên 2 cấp
-    // ai_engine/build/smart_plant_engine → Smart_Plant/ai_engine/build/
-    auto pos = path.rfind('/');         // bỏ /smart_plant_engine
-    if (pos != std::string::npos) path = path.substr(0, pos);
-    pos = path.rfind('/');              // bỏ /build
-    if (pos != std::string::npos) path = path.substr(0, pos);
-    pos = path.rfind('/');              // bỏ /ai_engine
-    if (pos != std::string::npos) path = path.substr(0, pos);
+    std::string bin_dir(exe_path);
+    auto pos = bin_dir.rfind('/');
+    if (pos != std::string::npos) {
+        bin_dir = bin_dir.substr(0, pos);
+    }
 
-    return path + "/server";
+    // Danh sách các đường dẫn server/ có thể xảy ra
+    std::vector<std::string> candidates = {
+        bin_dir + "/../server",           // Khi deploy: /Smart_Plant/ai_engine/ -> /Smart_Plant/server
+        bin_dir + "/../../server",        // Khi dev: /Smart_Plant/ai_engine/build/ -> /Smart_Plant/server
+        bin_dir + "/server",              // Cùng thư mục
+        "./server",
+        "../server"
+    };
+
+    for (const auto& path : candidates) {
+        if (access((path + "/index.js").c_str(), F_OK) == 0 ||
+            access((path + "/server.bundle.js").c_str(), F_OK) == 0 ||
+            access((path + "/server.js").c_str(), F_OK) == 0) {
+            return path;
+        }
+    }
+
+    // Trả về candidate đầu tiên làm fallback
+    return bin_dir + "/../server";
 }
 
 /**
@@ -112,26 +125,28 @@ std::string find_node_binary() {
 pid_t start_web_server(const std::string& server_dir) {
     std::string node_bin = find_node_binary();
     if (node_bin.empty()) {
-        std::cerr << "❌ Không tìm thấy Node.js! Hãy cài Node.js trước." << std::endl;
+        std::cerr << "❌ Không tìm thấy Node.js trên Pi! Vui lòng cài Node.js." << std::endl;
         return -1;
     }
 
-    std::string server_js = server_dir + "/server.js";
-    if (access(server_js.c_str(), F_OK) != 0) {
-        std::cerr << "❌ Không tìm thấy " << server_js << std::endl;
+    // Ưu tiên: index.js (bundled) > server.bundle.js > server.js
+    std::string target_js = "";
+    if (access((server_dir + "/index.js").c_str(), F_OK) == 0) {
+        target_js = server_dir + "/index.js";
+    } else if (access((server_dir + "/server.bundle.js").c_str(), F_OK) == 0) {
+        target_js = server_dir + "/server.bundle.js";
+    } else if (access((server_dir + "/server.js").c_str(), F_OK) == 0) {
+        target_js = server_dir + "/server.js";
+    } else {
+        std::cerr << "❌ Không tìm thấy file chạy Web Server trong " << server_dir << std::endl;
         return -1;
     }
 
-    // Kiểm tra node_modules
-    std::string node_modules = server_dir + "/node_modules";
-    if (access(node_modules.c_str(), F_OK) != 0) {
-        std::cerr << "❌ Chưa cài dependencies! Chạy: cd server && npm install" << std::endl;
-        return -1;
-    }
+    std::string filename = target_js.substr(target_js.rfind('/') + 1);
 
     std::cout << "🚀 Khởi động Web Server..." << std::endl;
-    std::cout << "   Node: " << node_bin << std::endl;
-    std::cout << "   Server: " << server_js << std::endl;
+    std::cout << "   Node  : " << node_bin << std::endl;
+    std::cout << "   Target: " << target_js << std::endl;
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -140,25 +155,21 @@ pid_t start_web_server(const std::string& server_dir) {
     }
 
     if (pid == 0) {
-        // Child process — chạy Node.js server
-        // Redirect stdout/stderr để không lẫn với output của C++
-        // Giữ stderr để thấy lỗi nếu có
         FILE* devnull = fopen("/dev/null", "w");
         if (devnull) {
             dup2(fileno(devnull), STDOUT_FILENO);
             fclose(devnull);
         }
 
-        // Chuyển vào thư mục server (để .env và db/ path đúng)
-        chdir(server_dir.c_str());
+        if (chdir(server_dir.c_str()) != 0) {
+            perror("chdir failed");
+        }
 
-        execl(node_bin.c_str(), "node", "server.js", nullptr);
-        // Nếu execl thất bại
+        execl(node_bin.c_str(), "node", filename.c_str(), nullptr);
         perror("execl failed");
         _exit(1);
     }
 
-    // Parent process
     return pid;
 }
 
