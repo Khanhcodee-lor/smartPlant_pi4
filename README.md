@@ -21,7 +21,17 @@ Smart_Plant/
 │       ├── sensor_simulator.cpp
 │       └── pest_detector.cpp
 │
-├── server/                 # Node.js — web server + dashboard
+├── client/                 # React + Vite — Frontend Dashboard UI
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── index.html
+│   └── src/
+│       ├── App.jsx
+│       ├── api.js
+│       ├── components/
+│       └── assets/
+│
+├── server/                 # Node.js — REST API + Static Web Server
 │   ├── server.js
 │   ├── package.json
 │   ├── .env
@@ -32,12 +42,12 @@ Smart_Plant/
 │   │   ├── sensor.js
 │   │   ├── pest.js
 │   │   └── zone.js
-│   └── public/
+│   └── public/             # Static files (built from client)
 │       ├── index.html
-│       ├── css/style.css
-│       └── js/app.js
+│       └── assets/
 │
 ├── .gitignore
+├── deploy.sh
 └── README.md
 ```
 
@@ -87,19 +97,23 @@ git clone <repo-url>
 cd Smart_Plant
 ```
 
-### 2. Build Web Server (Node.js)
+### 2. Build & Chạy Web Application
 
+#### a. Build & Run Frontend (React + Vite)
+```bash
+cd client
+npm install
+npm run dev      # Chạy dev server (HMR hot reload tại http://localhost:5173)
+# Hoặc build production:
+npm run build    # Xuất file tĩnh ra dist/ và copy sang server/public/
+```
+
+#### b. Build & Run Web Server (Node.js)
 ```bash
 cd server
-
-# Cài dependencies
 npm install
-
-# Tạo dữ liệu mẫu (lần đầu)
-npm run seed
-
-# Chạy server (development mode — auto reload khi sửa code)
-npm run dev
+npm run seed     # Tạo dữ liệu mẫu (lần đầu)
+npm run dev      # Chạy server (development mode tại http://localhost:3000)
 ```
 
 Server sẽ chạy tại: `http://0.0.0.0:3000`
@@ -195,6 +209,12 @@ Trên chính Pi: `http://localhost:3000`
 | `GET` | `/api/zones/:id` | Chi tiết khu vực |
 | `POST` | `/api/zones` | Tạo khu vực mới |
 | `PUT` | `/api/zones/:id` | Cập nhật khu vực |
+
+### Chat API
+
+| Method | Endpoint | Mô tả |
+|--------|----------|--------|
+| `POST` | `/api/chat` | Gửi tin nhắn cho Trợ lý AI (body: `{ "message": "..." }`) |
 
 ### Ví dụ gửi dữ liệu bằng curl
 

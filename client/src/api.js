@@ -61,3 +61,25 @@ export async function fetchPestLatest(limit = 10) {
 export async function fetchPestStats() {
   return apiFetch('/pests/stats');
 }
+
+/** Pest history (all) — GET /api/pests/history?days=30 */
+export async function fetchPestHistory(days = 30) {
+  const result = await apiFetch(`/pests/history?days=${days}`);
+  return result?.data || [];
+}
+
+/** Send Chat Message to Mock AI — POST /api/chat */
+export async function sendChatMessage(message) {
+  try {
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    if (!res.ok) throw new Error('Chat API Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] /chat:', err.message);
+    return null;
+  }
+}

@@ -3,14 +3,12 @@ import { Bug, AlertTriangle, ShieldAlert, ShieldCheck, Info } from 'lucide-react
 export default function PestTable({ pests }) {
   if (!pests || pests.length === 0) {
     return (
-      <div className="glass-card p-6 animate-slide-up">
-        <h3 className="text-sm font-semibold text-white mb-1">🐛 Phát hiện sâu bệnh</h3>
-        <p className="text-xs text-dark-300 mb-6">Các cảnh báo gần đây từ AI Engine</p>
-        <div className="flex flex-col items-center justify-center py-12 text-dark-400">
-          <ShieldCheck className="w-10 h-10 mb-3 text-emerald-500/50" />
-          <p className="text-sm font-medium">Không phát hiện sâu bệnh</p>
-          <p className="text-xs text-dark-400 mt-1">Khu vườn đang an toàn</p>
+      <div className="glass-panel p-8 h-full flex flex-col items-center justify-center text-center animate-fade-in-up">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4 border border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+          <ShieldCheck className="w-8 h-8 text-emerald-400" />
         </div>
+        <h3 className="text-lg font-bold text-slate-900 mb-2 font-display">Khu vườn an toàn</h3>
+        <p className="text-sm text-slate-500 font-medium">Hệ thống AI không phát hiện bất kỳ dấu hiệu sâu bệnh nào.</p>
       </div>
     );
   }
@@ -19,34 +17,38 @@ export default function PestTable({ pests }) {
     critical: {
       label: 'Nghiêm trọng',
       bg: 'bg-rose-500/10',
-      text: 'text-rose-400',
+      text: 'text-rose-600',
       border: 'border-rose-500/20',
       icon: ShieldAlert,
       dot: 'bg-rose-500',
+      shadow: 'shadow-sm'
     },
     high: {
       label: 'Cao',
       bg: 'bg-orange-500/10',
-      text: 'text-orange-400',
+      text: 'text-orange-600',
       border: 'border-orange-500/20',
       icon: AlertTriangle,
       dot: 'bg-orange-500',
+      shadow: 'shadow-sm'
     },
     medium: {
       label: 'Trung bình',
       bg: 'bg-amber-500/10',
-      text: 'text-amber-400',
+      text: 'text-amber-600',
       border: 'border-amber-500/20',
       icon: Info,
       dot: 'bg-amber-500',
+      shadow: ''
     },
     low: {
       label: 'Thấp',
       bg: 'bg-emerald-500/10',
-      text: 'text-emerald-400',
+      text: 'text-emerald-600',
       border: 'border-emerald-500/20',
       icon: ShieldCheck,
       dot: 'bg-emerald-500',
+      shadow: ''
     },
   };
 
@@ -64,44 +66,33 @@ export default function PestTable({ pests }) {
   };
 
   return (
-    <div className="glass-card p-4 sm:p-6 animate-slide-up" style={{ animationDelay: '200ms' }}>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-sm font-semibold text-white mb-0.5">🐛 Phát hiện sâu bệnh</h3>
-          <p className="text-xs text-dark-300">Các cảnh báo gần đây từ AI Engine</p>
-        </div>
-        <span className="text-xs text-dark-400 bg-dark-600 px-3 py-1 rounded-full">
-          {pests.length} kết quả
-        </span>
-      </div>
-
+    <div className="glass-panel flex flex-col h-full animate-fade-in-up" style={{ animationDelay: '200ms' }}>
       {/* Mobile Cards View */}
-      <div className="block sm:hidden space-y-3">
+      <div className="block sm:hidden space-y-3 p-4">
         {pests.map((pest, i) => {
           const sev = severityConfig[pest.severity] || severityConfig.low;
-          const SevIcon = sev.icon;
           return (
             <div
               key={pest.id || i}
-              className="bg-dark-700/50 rounded-xl p-4 border border-dark-500/30"
+              className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm"
             >
               <div className="flex items-start justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <Bug className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm font-semibold text-white">{pest.pest_type}</span>
+                  <Bug className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm font-bold text-slate-900">{pest.pest_type}</span>
                 </div>
                 <span
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${sev.bg} ${sev.text} ${sev.border}`}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase border ${sev.bg} ${sev.text} ${sev.border} ${sev.shadow}`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${sev.dot}`} />
                   {sev.label}
                 </span>
               </div>
-              <div className="text-xs text-dark-300 space-y-1">
-                <p>📍 {pest.zone_name || 'Không xác định'}</p>
-                <p>📊 Độ tin cậy: {(pest.confidence * 100).toFixed(0)}%</p>
+              <div className="text-xs text-slate-500 space-y-1 mt-3 font-medium">
+                <p>📍 <span className="text-slate-700 font-bold">{pest.zone_name || 'Không xác định'}</span></p>
+                <p>📊 Độ tin cậy: <span className="text-emerald-600 font-bold tabular-nums">{(pest.confidence * 100).toFixed(0)}%</span></p>
                 <p>🕐 {formatTime(pest.timestamp)}</p>
-                {pest.notes && <p className="text-dark-400 italic mt-1">"{pest.notes}"</p>}
+                {pest.notes && <p className="text-slate-400 italic mt-1 bg-slate-50 p-2 rounded-lg border border-slate-200">"{pest.notes}"</p>}
               </div>
             </div>
           );
@@ -109,27 +100,24 @@ export default function PestTable({ pests }) {
       </div>
 
       {/* Desktop Table View */}
-      <div className="hidden sm:block overflow-x-auto">
-        <table className="w-full">
+      <div className="hidden sm:block overflow-x-auto flex-1 p-2">
+        <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b border-dark-500/30">
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
+            <tr className="border-b border-slate-200">
+              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
                 Thời gian
               </th>
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
+              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
                 Khu vực
               </th>
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
+              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
                 Loại sâu bệnh
               </th>
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
+              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
                 Mức độ
               </th>
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
+              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
                 Độ tin cậy
-              </th>
-              <th className="text-left text-[10px] font-semibold text-dark-300 uppercase tracking-wider py-3 px-3">
-                Ghi chú
               </th>
             </tr>
           </thead>
@@ -140,47 +128,44 @@ export default function PestTable({ pests }) {
               return (
                 <tr
                   key={pest.id || i}
-                  className="border-b border-dark-500/20 hover:bg-dark-600/30 transition-colors"
+                  className="border-b border-slate-200 hover:bg-slate-50/80 transition-colors group cursor-default"
                 >
-                  <td className="py-3 px-3">
-                    <span className="text-xs text-dark-300">{formatTime(pest.timestamp)}</span>
+                  <td className="py-4 px-4">
+                    <span className="text-xs font-semibold text-slate-500 group-hover:text-slate-700 transition-colors">{formatTime(pest.timestamp)}</span>
                   </td>
-                  <td className="py-3 px-3">
-                    <span className="text-xs font-medium text-white">
+                  <td className="py-4 px-4">
+                    <span className="text-xs font-bold text-slate-900 tracking-wide">
                       {pest.zone_name || '—'}
                     </span>
                   </td>
-                  <td className="py-3 px-3">
-                    <div className="flex items-center gap-1.5">
-                      <Bug className="w-3.5 h-3.5 text-amber-400/70" />
-                      <span className="text-xs font-medium text-white">{pest.pest_type}</span>
+                  <td className="py-4 px-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-md bg-amber-100 flex items-center justify-center border border-amber-200">
+                        <Bug className="w-3.5 h-3.5 text-amber-500" />
+                      </div>
+                      <span className="text-xs font-bold text-slate-900 tracking-wide">{pest.pest_type}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-3">
+                  <td className="py-4 px-4">
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${sev.bg} ${sev.text} ${sev.border}`}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${sev.bg} ${sev.text} ${sev.border} ${sev.shadow}`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${sev.dot}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${sev.dot} animate-pulse`} />
                       {sev.label}
                     </span>
                   </td>
-                  <td className="py-3 px-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 bg-dark-600 rounded-full overflow-hidden max-w-[60px]">
+                  <td className="py-4 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden w-full max-w-[80px] border border-slate-300 shadow-inner">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
+                          className="h-full rounded-full bg-emerald-500 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(16,185,129,0.3)]"
                           style={{ width: `${confidence}%` }}
                         />
                       </div>
-                      <span className="text-xs font-medium text-white tabular-nums">
+                      <span className="text-xs font-bold text-emerald-600 tabular-nums">
                         {confidence}%
                       </span>
                     </div>
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className="text-xs text-dark-300 line-clamp-1 max-w-[200px] block">
-                      {pest.notes || '—'}
-                    </span>
                   </td>
                 </tr>
               );

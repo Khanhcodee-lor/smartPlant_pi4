@@ -1,8 +1,6 @@
 import { useMemo } from 'react';
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   AreaChart,
   Area,
   XAxis,
@@ -16,21 +14,25 @@ function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
 
   return (
-    <div className="bg-dark-700/95 backdrop-blur-md border border-dark-500/50 rounded-xl px-4 py-3 shadow-2xl">
-      <p className="text-xs text-dark-300 font-medium mb-2">{label}</p>
-      {payload.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2 text-sm">
-          <span
-            className="w-2 h-2 rounded-full"
-            style={{ background: entry.color }}
-          />
-          <span className="text-dark-300">{entry.name}:</span>
-          <span className="font-semibold text-white">
-            {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
-            {entry.unit || ''}
-          </span>
-        </div>
-      ))}
+    <div className="glass-panel p-4 max-w-[200px]">
+      <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-3 font-display border-b border-slate-200 pb-2">{label}</p>
+      <div className="space-y-3">
+        {payload.map((entry, i) => (
+          <div key={i} className="flex items-center justify-between gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span
+                className="w-2.5 h-2.5 rounded-sm shadow-[0_0_10px_currentColor]"
+                style={{ background: entry.color, color: entry.color }}
+              />
+              <span className="text-slate-500 font-medium">{entry.name}</span>
+            </div>
+            <span className="font-bold text-slate-900 tabular-nums">
+              {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
+              <span className="text-[10px] text-slate-400 ml-0.5">{entry.unit || ''}</span>
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -40,12 +42,10 @@ export default function SensorChart({ history, selectedZone }) {
   const chartData = useMemo(() => {
     if (!history || history.length === 0) return [];
 
-    // If data for multiple zones, aggregate averages per timestamp
-    // Group by rounded timestamp (every 15 min)
+    // Group by rounded timestamp (every 30 min)
     const grouped = {};
     for (const row of history) {
       const date = new Date(row.timestamp);
-      // Round to nearest 30 min for cleaner chart
       date.setMinutes(Math.round(date.getMinutes() / 30) * 30, 0, 0);
       const key = date.toISOString();
 
@@ -78,110 +78,130 @@ export default function SensorChart({ history, selectedZone }) {
 
   if (chartData.length === 0) {
     return (
-      <div className="glass-card p-6 flex items-center justify-center h-[300px]">
-        <p className="text-dark-300 text-sm">Chưa có dữ liệu cảm biến</p>
+      <div className="flex items-center justify-center h-[300px]">
+        <p className="text-slate-400 font-medium text-sm tracking-wide">Chưa có dữ liệu cảm biến</p>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
       {/* Temperature & Humidity Chart */}
-      <div className="glass-card p-4 sm:p-6 animate-slide-up">
-        <h3 className="text-sm font-semibold text-white mb-1">
-          🌡️ Nhiệt độ & Độ ẩm không khí
-        </h3>
-        <p className="text-xs text-dark-300 mb-4">Dữ liệu 24 giờ gần nhất</p>
-        <div className="h-[280px] sm:h-[300px]">
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
+              🌡️ Nhiệt độ & Độ ẩm không khí
+            </h3>
+            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">Dữ liệu 24 giờ gần nhất</p>
+          </div>
+        </div>
+        <div className="h-[280px] sm:h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+            <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradTemp" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#f43f5e" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gradHumid" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="time"
-                stroke="#475569"
-                fontSize={11}
+                axisLine={false}
                 tickLine={false}
-                interval="preserveStartEnd"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                dy={10}
               />
-              <YAxis stroke="#475569" fontSize={11} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                wrapperStyle={{ fontSize: '12px', color: '#94a3b8' }}
-                iconType="circle"
-                iconSize={8}
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                dx={-10}
               />
-              <Line
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(0,0,0,0.05)', strokeWidth: 1, strokeDasharray: '4 4' }} />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" iconSize={8} />
+              
+              <Area
                 type="monotone"
                 dataKey="Nhiệt độ"
                 stroke="#f43f5e"
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={{ r: 5, fill: '#f43f5e', stroke: '#111827', strokeWidth: 2 }}
+                strokeWidth={3}
+                fill="url(#gradTemp)"
+                activeDot={{ r: 6, fill: '#f43f5e', stroke: '#ffffff', strokeWidth: 3 }}
               />
-              <Line
+              <Area
                 type="monotone"
                 dataKey="Độ ẩm KK"
                 stroke="#06b6d4"
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={{ r: 5, fill: '#06b6d4', stroke: '#111827', strokeWidth: 2 }}
+                strokeWidth={3}
+                fill="url(#gradHumid)"
+                activeDot={{ r: 6, fill: '#06b6d4', stroke: '#ffffff', strokeWidth: 3 }}
               />
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       {/* Light & Soil Moisture Chart */}
-      <div className="glass-card p-4 sm:p-6 animate-slide-up" style={{ animationDelay: '100ms' }}>
-        <h3 className="text-sm font-semibold text-white mb-1">
-          ☀️ Ánh sáng & Độ ẩm đất
-        </h3>
-        <p className="text-xs text-dark-300 mb-4">Dữ liệu 24 giờ gần nhất</p>
-        <div className="h-[280px] sm:h-[300px]">
+      <div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
+              ☀️ Ánh sáng & Độ ẩm đất
+            </h3>
+            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">Dữ liệu 24 giờ gần nhất</p>
+          </div>
+        </div>
+        <div className="h-[280px] sm:h-[320px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
               <defs>
                 <linearGradient id="gradLight" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#fbbf24" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="gradSoil" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="time"
-                stroke="#475569"
-                fontSize={11}
+                axisLine={false}
                 tickLine={false}
-                interval="preserveStartEnd"
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                dy={10}
               />
-              <YAxis stroke="#475569" fontSize={11} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                wrapperStyle={{ fontSize: '12px', color: '#94a3b8' }}
-                iconType="circle"
-                iconSize={8}
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#64748b', fontSize: 11 }}
+                dx={-10}
               />
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(0,0,0,0.05)', strokeWidth: 1, strokeDasharray: '4 4' }} />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" iconSize={8} />
+              
               <Area
                 type="monotone"
                 dataKey="Ánh sáng"
                 stroke="#fbbf24"
-                strokeWidth={2}
+                strokeWidth={3}
                 fill="url(#gradLight)"
-                dot={false}
-                activeDot={{ r: 5, fill: '#fbbf24', stroke: '#111827', strokeWidth: 2 }}
+                activeDot={{ r: 6, fill: '#fbbf24', stroke: '#ffffff', strokeWidth: 3 }}
               />
               <Area
                 type="monotone"
                 dataKey="Độ ẩm đất"
                 stroke="#10b981"
-                strokeWidth={2}
+                strokeWidth={3}
                 fill="url(#gradSoil)"
-                dot={false}
-                activeDot={{ r: 5, fill: '#10b981', stroke: '#111827', strokeWidth: 2 }}
+                activeDot={{ r: 6, fill: '#10b981', stroke: '#ffffff', strokeWidth: 3 }}
               />
             </AreaChart>
           </ResponsiveContainer>

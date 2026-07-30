@@ -23,6 +23,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/sensors', sensorRoutes);
 app.use('/api/pests', pestRoutes);
 app.use('/api/zones', zoneRoutes);
+const chatRoutes = require('./routes/chat');
+app.use('/api/chat', chatRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
