@@ -148,6 +148,11 @@ pid_t start_web_server(const std::string& server_dir) {
     std::cout << "   Node  : " << node_bin << std::endl;
     std::cout << "   Target: " << target_js << std::endl;
 
+    // Tự động dọn dẹp port 3000 phòng trường hợp tiến trình cũ bị treo (orphaned node process)
+    // Giúp tránh lỗi EADDRINUSE vòng lặp vô hạn
+    system("fuser -k 3000/tcp 2>/dev/null");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
     pid_t pid = fork();
     if (pid < 0) {
         std::cerr << "❌ fork() thất bại" << std::endl;
@@ -241,6 +246,22 @@ Config parse_args(int argc, char* argv[]) {
 }
 
 int main(int argc, char* argv[]) {
+    // Kiểm tra chế độ chạy phân tích ảnh đơn lẻ (CLI mode cho Web Server)
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--analyze" && i + 1 < argc) {
+            std::string img_path = argv[i + 1];
+            PestDetector detector;
+            auto result = detector.detect_image(img_path);
+            if (!result.is_null()) {
+                std::cout << result.dump() << std::endl;
+            } else {
+                std::cout << "{\"pest_type\":\"Cây khỏe mạnh (Healthy)\",\"confidence\":1.0,\"severity\":\"low\",\"notes\":\"Không phát hiện dấu hiệu sâu bệnh trên ảnh này\"}" << std::endl;
+            }
+            return 0;
+        }
+    }
+
     // Parse arguments
     Config cfg = parse_args(argc, argv);
 
@@ -345,24 +366,18 @@ int main(int argc, char* argv[]) {
         // === CHẠY PEST DETECTION ===
         if (tick % cfg.pest_interval == 0) {
             int zone_id = (pest_counter % cfg.num_zones) + 1;
-            auto result = pest.detect(zone_id);
+            
+            // Tạm thời TẮT chế độ tự động lấy ảnh theo yêu cầu của user
+            // auto result = pest.detect(zone_id);
+            // if (!result.is_null()) {
+            //     bool ok = http.post("/api/pests", result.dump());
+            //     ...
+            // }
 
-            if (!result.is_null()) {
-                bool ok = http.post("/api/pests", result.dump());
-
-                std::cout << "[" << current_time_str() << "] "
-                          << "🔬 Pest Zone " << zone_id << ": "
-                          << result["pest_type"].get<std::string>() << " "
-                          << "(conf=" << result["confidence"] << ", "
-                          << result["severity"].get<std::string>() << ") "
-                          << (ok ? "✅" : "❌")
-                          << std::endl;
-            } else {
-                std::cout << "[" << current_time_str() << "] "
-                          << "🔬 Pest Zone " << zone_id << ": "
-                          << "Không phát hiện sâu bệnh ✅"
-                          << std::endl;
-            }
+            std::cout << "[" << current_time_str() << "] "
+                      << "🔬 Pest Zone " << zone_id << ": "
+                      << "Chế độ tự động lấy ảnh đang TẮT ⏸️"
+                      << std::endl;
 
             pest_counter++;
         }

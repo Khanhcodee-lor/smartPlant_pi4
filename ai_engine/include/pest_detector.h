@@ -21,6 +21,16 @@ public:
      */
     nlohmann::json detect(int zone_id);
 
+    /**
+     * Chạy phát hiện trên 1 file ảnh cụ thể
+     */
+    nlohmann::json detect_image(const std::string& image_path, int zone_id = 1);
+
+    /**
+     * Chạy phát hiện trên cv::Mat
+     */
+    nlohmann::json detect_mat(cv::Mat& frame, int zone_id = 1, bool include_b64 = false);
+
     void set_detection_probability(double prob);
 
 private:
@@ -41,4 +51,6 @@ private:
     // Hàm phụ trợ YOLOv8
     void draw_label(cv::Mat& input_image, const std::string& label, int left, int top);
     std::string mat_to_base64(const cv::Mat& img);
+    cv::Mat get_test_image();
+    size_t test_image_index_ = 0;
 };

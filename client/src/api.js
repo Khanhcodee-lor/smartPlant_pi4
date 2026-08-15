@@ -59,7 +59,20 @@ export async function fetchPestLatest(limit = 10) {
 
 /** Pest statistics — GET /api/pests/stats */
 export async function fetchPestStats() {
-  return apiFetch('/pests/stats');
+  const result = await apiFetch('/pests/stats');
+  return result || null;
+}
+
+/** Clear Pest history — DELETE /api/pests/all */
+export async function clearPestHistory() {
+  try {
+    const res = await fetch(`${API_BASE}/pests/all`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`API Error: ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error(`[API] DELETE /pests/all:`, err.message);
+    return null;
+  }
 }
 
 /** Pest history (all) — GET /api/pests/history?days=30 */
@@ -83,3 +96,44 @@ export async function sendChatMessage(message) {
     return null;
   }
 }
+
+/** Get list of test images from SD card/storage — GET /api/pests/test-images */
+export async function fetchTestImages() {
+  const result = await apiFetch('/pests/test-images');
+  return result?.images || [];
+}
+
+/** Upload a test image to storage — POST /api/pests/upload-test */
+export async function uploadTestImage(imageBase64, filename) {
+  try {
+    const res = await fetch(`${API_BASE}/pests/upload-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64: imageBase64, filename })
+    });
+    if (!res.ok) throw new Error('Upload Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] /pests/upload-test:', err.message);
+    return null;
+  }
+}
+
+/** Analyze a specific test image on demand — POST /api/pests/analyze */
+export async function analyzeImage(filename, imagePath = null) {
+  try {
+    const res = await fetch(`${API_BASE}/pests/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, image_path: imagePath })
+    });
+    if (!res.ok) throw new Error('Analyze Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] /pests/analyze:', err.message);
+    return null;
+  }
+}
+
+
+

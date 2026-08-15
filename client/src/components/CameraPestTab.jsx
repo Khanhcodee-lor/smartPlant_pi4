@@ -1,20 +1,109 @@
-import { useState, useEffect } from 'react';
-import { Camera, AlertCircle, Video, Play, Maximize2, X } from 'lucide-react';
-import { fetchPestHistory } from '../api';
+import { useState, useEffect, useRef } from 'react';
+import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory } from '../api';
+import { Trash2 } from 'lucide-react';
 
 export default function CameraPestTab() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [testImages, setTestImages] = useState([]);
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [activeTestImage, setActiveTestImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(Date.now());
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     async function loadData() {
-      const data = await fetchPestHistory(30); // Lấy lịch sử 30 ngày
-      setHistory(data);
+      setLoading(true);
+      const [histData, testData] = await Promise.all([
+        fetchPestHistory(30),
+        fetchTestImages()
+      ]);
+      setHistory(histData || []);
+      setTestImages(testData || []);
       setLoading(false);
     }
     loadData();
-  }, []);
+  }, [refreshKey]);
+
+  // Auto-refresh lịch sử và ảnh live mỗi 10 giây
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const histData = await fetchPestHistory(30);
+      if (histData) {
+        setHistory(histData);
+      }
+      // Cũng refresh ảnh live detection nếu đang ở chế độ camera
+      if (!activeTestImage) {
+        setRefreshKey(Date.now());
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeTestImage]);
+
+  // Kích hoạt AI phân tích ảnh ngay lập tức
+  const handleSelectAndAnalyze = async (filename, directUrl = null) => {
+    setShowTestModal(false);
+    setAnalyzing(true);
+    setAnalysisResult(null);
+
+    const res = await analyzeImage(filename);
+    if (res?.success && res?.data) {
+      setAnalysisResult(res.data);
+      // Hiển thị ảnh đã vẽ bounding box (b64 hoặc url)
+      if (res.data.image_b64) {
+        setActiveTestImage(res.data.image_b64);
+      } else if (res.data.image_path) {
+        setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
+      } else if (directUrl) {
+        setActiveTestImage(directUrl);
+      }
+      // Refresh lại lịch sử bệnh
+      const updatedHist = await fetchPestHistory(30);
+      setHistory(updatedHist || []);
+    } else {
+      if (directUrl) setActiveTestImage(directUrl);
+    }
+    setAnalyzing(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result;
+      const res = await uploadTestImage(base64, file.name);
+      if (res && res.filename) {
+        // Tải xong -> phân tích AI ngay lập tức luôn!
+        const updated = await fetchTestImages();
+        setTestImages(updated || []);
+        await handleSelectAndAnalyze(res.filename, res.url);
+      }
+      setUploading(false);
+      alert('Đã tải ảnh lên thành công. Bạn có thể chọn ảnh này để test AI.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClearHistory = async () => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa TOÀN BỘ lịch sử phát hiện bệnh không? Hành động này không thể hoàn tác.")) {
+      const res = await clearPestHistory();
+      if (res?.success) {
+        setHistory([]);
+      } else {
+        alert("Có lỗi xảy ra khi xóa lịch sử");
+      }
+    }
+  };
+
 
   const severityConfig = {
     critical: { label: 'Nghiêm trọng', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' },
@@ -33,46 +122,140 @@ export default function CameraPestTab() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Live Camera Section */}
+      {/* Live Camera / Test Image View Section */}
       <section className="glass-panel p-4 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <Camera className="w-5 h-5 text-emerald-600" />
-              Live Camera
+              Camera & Nhận diện Bệnh AI
             </h2>
-            <p className="text-sm text-slate-500">Khu vực B - Cà chua (Demo Stream)</p>
+            <p className="text-sm text-slate-500">
+              {activeTestImage 
+                ? 'Đang xem ảnh mẫu từ thẻ nhớ' 
+                : 'Luồng camera thời gian thực / Kết quả nhận diện gần nhất'}
+            </p>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1 bg-rose-50 text-rose-600 rounded-full border border-rose-200">
-            <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider">LIVE</span>
+          
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setShowTestModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs rounded-lg border border-emerald-200 transition-colors shadow-sm"
+              title="Chọn ảnh trong thẻ nhớ của Pi"
+            >
+              <FolderOpen className="w-4 h-4 text-emerald-600" />
+              <span>Chọn ảnh trong thẻ nhớ ({testImages.length})</span>
+            </button>
+
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs rounded-lg border border-indigo-200 transition-colors shadow-sm disabled:opacity-50"
+              title="Tải thêm ảnh vào thẻ nhớ Pi"
+            >
+              <Upload className="w-4 h-4 text-indigo-600" />
+              <span>{uploading ? 'Đang tải...' : 'Tải ảnh lên Pi'}</span>
+            </button>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileUpload} 
+              accept="image/*" 
+              className="hidden" 
+            />
+
+            <button 
+              onClick={() => {
+                setActiveTestImage(null);
+                setRefreshKey(Date.now());
+              }}
+              className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg border border-slate-200 transition-colors"
+              title="Làm mới"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2 px-3 py-1 bg-rose-50 text-rose-600 rounded-full border border-rose-200">
+              <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {activeTestImage ? 'TEST VIEW' : 'AI LIVE'}
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="relative aspect-video bg-slate-900 rounded-xl overflow-hidden group">
-          {/* Giả lập Camera Stream */}
-          <img 
-            src="https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop" 
-            alt="Live Camera Feed"
-            className="w-full h-full object-cover opacity-80 mix-blend-screen"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent pointer-events-none" />
-          
-          <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white/90">
-            <div className="flex items-center gap-2 text-sm font-mono bg-black/40 px-3 py-1.5 rounded-lg backdrop-blur-sm">
-              <Video className="w-4 h-4 text-emerald-400" />
-              1920x1080 30FPS
+        {/* Analysis Result Toast / Banner */}
+        {analysisResult && (
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between animate-fade-in-up">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <p className="text-xs font-bold text-slate-900">
+                  Kết quả phân tích: <span className="text-emerald-700">{analysisResult.pest_type}</span> ({Math.round(analysisResult.confidence * 100)}%)
+                </p>
+                <p className="text-[11px] text-slate-600 mt-0.5">{analysisResult.notes}</p>
+              </div>
             </div>
-            <button className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors">
-              <Maximize2 className="w-5 h-5" />
+            <button 
+              onClick={() => setAnalysisResult(null)}
+              className="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <X className="w-4 h-4" />
             </button>
           </div>
+        )}
+
+        <div className="relative w-full h-[45vh] sm:h-[55vh] md:h-[65vh] 2xl:h-[70vh] bg-slate-900 rounded-xl overflow-hidden group shadow-inner">
+          {/* Active Image (Test image or latest detection or fallback) */}
+          <img 
+            src={activeTestImage || `/latest_detection.jpg?t=${refreshKey}`} 
+            alt="AI Detection Feed"
+            onError={(e) => {
+              // Fallback nếu chưa có latest_detection.jpg
+              if (!activeTestImage) {
+                e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
+              }
+            }}
+            className="w-full h-full object-contain bg-slate-950"
+          />
+
+          {/* Analyzing Spinner Overlay */}
+          {analyzing && (
+            <div className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm flex flex-col items-center justify-center text-white z-20 animate-fade-in-up">
+              <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
+              <p className="font-bold text-sm tracking-wide">Đang chạy mô hình AI YOLOv8...</p>
+              <p className="text-xs text-slate-300 mt-1">Đang phân tích và vẽ khung nhận diện bệnh trên ảnh</p>
+            </div>
+          )}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent pointer-events-none" />
           
-          {/* Nút giả lập phát lại */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <button className="w-16 h-16 rounded-full bg-emerald-500/80 text-white flex items-center justify-center backdrop-blur-md hover:scale-110 transition-transform">
-              <Play className="w-8 h-8 ml-1" />
-            </button>
+          <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white/90 z-10">
+            <div className="flex items-center gap-2 text-xs font-mono bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-md border border-white/10">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <span>YOLOv8 ONNX (Tomato Leaves 640x640)</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {activeTestImage && (
+                <button 
+                  onClick={() => {
+                    setActiveTestImage(null);
+                    setAnalysisResult(null);
+                  }}
+                  className="px-2.5 py-1 text-xs font-medium bg-white/20 hover:bg-white/30 text-white rounded-lg backdrop-blur-sm transition-colors"
+                >
+                  Quay lại Camera
+                </button>
+              )}
+              <button 
+                onClick={() => setSelectedImage(activeTestImage || `/latest_detection.jpg?t=${refreshKey}`)}
+                className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors text-white"
+                title="Phóng to ảnh"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -81,8 +264,22 @@ export default function CameraPestTab() {
       <section>
         <div className="flex items-center justify-between mb-4 px-2">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Lịch sử bệnh hại</h2>
-            <p className="text-sm text-slate-500">Hình ảnh lưu trữ từ hệ thống AI</p>
+            <h2 className="text-xl font-bold text-slate-900">Lịch sử phát hiện bệnh hại</h2>
+            <p className="text-sm text-slate-500">Các kết quả quét từ camera và ảnh test của hệ thống AI</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-xs font-medium text-slate-500">
+              Tổng cộng: {history.length} bản ghi
+            </span>
+            {history.length > 0 && (
+              <button 
+                onClick={handleClearHistory}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors text-xs font-semibold shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa tất cả</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -92,7 +289,9 @@ export default function CameraPestTab() {
           </div>
         ) : history.length === 0 ? (
           <div className="glass-panel p-8 text-center text-slate-500">
-            Không có dữ liệu lịch sử nào.
+            <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2 opacity-80" />
+            <p className="font-semibold text-slate-700">Chưa có bản ghi sâu bệnh nào!</p>
+            <p className="text-xs text-slate-400 mt-1">Hệ thống đang hoạt động và sẵn sàng quét khi có cây bị bệnh.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -103,7 +302,7 @@ export default function CameraPestTab() {
               return (
                 <div key={item.id} className="glass-panel overflow-hidden group hover:shadow-md transition-shadow">
                   <div 
-                    className="relative h-40 bg-slate-100 cursor-pointer overflow-hidden"
+                    className="relative h-40 bg-slate-900 cursor-pointer overflow-hidden flex items-center justify-center"
                     onClick={() => hasImage && setSelectedImage(item.image_path)}
                   >
                     {hasImage ? (
@@ -133,6 +332,11 @@ export default function CameraPestTab() {
                       <span>{item.zone_name || 'Khu vực không rõ'}</span>
                       <span className="font-semibold text-emerald-600">{(item.confidence * 100).toFixed(0)}%</span>
                     </div>
+                    {item.notes && (
+                      <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2 bg-slate-50 p-1.5 rounded border border-slate-200">
+                        {item.notes}
+                      </p>
+                    )}
                     <p className="text-[10px] text-slate-400 mt-2">{formatTime(item.timestamp)}</p>
                   </div>
                 </div>
@@ -142,7 +346,91 @@ export default function CameraPestTab() {
         )}
       </section>
 
-      {/* Image Modal */}
+      {/* Modal: Chọn ảnh từ thẻ nhớ */}
+      {showTestModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in-up"
+          onClick={() => setShowTestModal(false)}
+        >
+          <div 
+            className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-emerald-600" />
+                  Kho ảnh mẫu trên Thẻ nhớ Pi
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Bấm vào bất kỳ ảnh nào để kích hoạt AI phân tích ngay</p>
+              </div>
+              <button 
+                onClick={() => setShowTestModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              {testImages.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <FolderOpen className="w-12 h-12 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm font-medium">Chưa có ảnh nào trong thư mục `test_images/`</p>
+                  <p className="text-xs mt-1">Dùng nút "Tải ảnh lên Pi" ở ngoài để thêm ảnh vào thẻ nhớ.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {testImages.map((img, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => handleSelectAndAnalyze(img.filename, img.url)}
+                      className="group cursor-pointer rounded-xl border border-slate-200 overflow-hidden hover:border-emerald-500 hover:shadow-md transition-all bg-slate-50"
+                    >
+                      <div className="aspect-square bg-slate-900 overflow-hidden relative">
+                        <img 
+                          src={img.url} 
+                          alt={img.filename}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-emerald-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <span className="px-2 py-1 bg-emerald-600 text-white font-bold text-[11px] rounded-lg shadow">
+                            ⚡ Phân tích AI
+                          </span>
+                        </div>
+                      </div>
+                      <div className="p-2">
+                        <p className="text-[11px] font-medium text-slate-700 truncate" title={img.filename}>
+                          {img.filename}
+                        </p>
+                        <span className="text-[10px] text-emerald-600 font-semibold group-hover:underline">
+                          Chạy AI ngay →
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>Đang có {testImages.length} ảnh mẫu</span>
+              <button 
+                onClick={() => {
+                  setShowTestModal(false);
+                  fileInputRef.current?.click();
+                }}
+                className="text-emerald-600 font-semibold hover:underline flex items-center gap-1"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                Thêm ảnh mới
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal phóng to ảnh */}
       {selectedImage && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in-up"
@@ -167,3 +455,4 @@ export default function CameraPestTab() {
     </div>
   );
 }
+
