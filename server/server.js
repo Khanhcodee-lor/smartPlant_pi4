@@ -7,6 +7,8 @@ const { initDatabase } = require('./db/database');
 const sensorRoutes = require('./routes/sensor');
 const pestRoutes = require('./routes/pest');
 const zoneRoutes = require('./routes/zone');
+const chatRoutes = require('./routes/chat');
+const cameraRoutes = require('./routes/camera');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,8 +25,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/sensors', sensorRoutes);
 app.use('/api/pests', pestRoutes);
 app.use('/api/zones', zoneRoutes);
-const chatRoutes = require('./routes/chat');
 app.use('/api/chat', chatRoutes);
+app.use('/api/camera', cameraRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

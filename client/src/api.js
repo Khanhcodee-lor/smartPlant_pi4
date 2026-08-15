@@ -135,5 +135,22 @@ export async function analyzeImage(filename, imagePath = null) {
   }
 }
 
-
-
+/** Capture a snapshot from Livestream and analyze immediately (server-side) */
+export async function captureAndAnalyze() {
+  try {
+    const res = await fetch(`${API_BASE}/pests/capture-analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.error('[API] capture-analyze error:', errData);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] captureAndAnalyze:', err.message);
+    return null;
+  }
+}

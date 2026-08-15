@@ -87,11 +87,14 @@ const { execFile } = require('child_process');
 
 function getEngineBinaryPath() {
   const candidates = [
-    '/home/toan/Smart_Plant/ai_engine/smart_plant_engine',
-    path.join(__dirname, '../../ai_engine/smart_plant_engine'),
+    '/home/toan/Smart_Plant/ai_engine/build/smart_plant_engine',
+    path.join(__dirname, '../../ai_engine/build/smart_plant_engine'),
     path.join(__dirname, '../../ai_engine/build_pi/smart_plant_engine'),
-    path.join(process.cwd(), 'ai_engine/smart_plant_engine'),
-    path.join(process.cwd(), '../ai_engine/smart_plant_engine')
+    path.join(process.cwd(), 'ai_engine/build/smart_plant_engine'),
+    path.join(process.cwd(), '../ai_engine/build/smart_plant_engine'),
+    // Fallback: tìm ở thư mục gốc (nếu ai đó copy ra ngoài)
+    '/home/toan/Smart_Plant/ai_engine/smart_plant_engine',
+    path.join(process.cwd(), 'ai_engine/smart_plant_engine')
   ];
   for (const b of candidates) {
     if (fs.existsSync(b)) return b;
@@ -167,6 +170,94 @@ router.post('/analyze', (req, res) => {
       }
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const axios = require('axios');
+const USTREAMER_URL = process.env.USTREAMER_URL || 'http://127.0.0.1:8080';
+
+// POST /api/pests/capture-analyze — Chụp snapshot từ camera rồi phân tích AI ngay (tất cả phía server)
+router.post('/capture-analyze', async (req, res) => {
+  try {
+    // Bước 1: Chụp snapshot từ ustreamer
+    console.log('[Capture] Đang chụp snapshot từ camera...');
+    let snapshotData;
+    try {
+      const snapRes = await axios.get(`${USTREAMER_URL}/snapshot`, { 
+        responseType: 'arraybuffer',
+        timeout: 10000 
+      });
+      snapshotData = Buffer.from(snapRes.data);
+    } catch (snapErr) {
+      console.error('[Capture] Lỗi chụp snapshot:', snapErr.message);
+      return res.status(502).json({ error: 'Không thể chụp ảnh từ camera: ' + snapErr.message });
+    }
+
+    // Bước 2: Lưu ảnh vào thư mục test_images
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+    const filename = `capture_${timestamp}.jpg`;
+    const dir = getTestImagesDir();
+    const filePath = path.join(dir, filename);
+    fs.writeFileSync(filePath, snapshotData);
+    console.log(`[Capture] Đã lưu ảnh: ${filePath} (${snapshotData.length} bytes)`);
+
+    // Bước 3: Gọi AI engine phân tích
+    const binary = getEngineBinaryPath();
+    if (!fs.existsSync(binary)) {
+      return res.status(500).json({ error: 'Không tìm thấy binary smart_plant_engine: ' + binary });
+    }
+
+    execFile(binary, ['--analyze', filePath], { timeout: 120000, maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('[Capture AI Error]:', error.message, stderr);
+        return res.status(500).json({ error: 'AI engine lỗi: ' + error.message, stderr });
+      }
+
+      try {
+        const lines = stdout.trim().split('\n');
+        let jsonStr = '';
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (lines[i].trim().startsWith('{')) {
+            jsonStr = lines[i].trim();
+            break;
+          }
+        }
+
+        if (!jsonStr) {
+          return res.status(500).json({ error: 'Không đọc được kết quả JSON từ AI engine', stdout });
+        }
+
+        const result = JSON.parse(jsonStr);
+
+        // Lưu vào database
+        if (result.pest_type && result.pest_type !== 'Cây khỏe mạnh (Healthy)') {
+          const db = getDb();
+          const stmt = db.prepare(`
+            INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `);
+          stmt.run(
+            result.pest_type,
+            result.confidence || 0.9,
+            result.image_path || '/latest_detection.jpg',
+            result.zone_id || 1,
+            result.severity || 'medium',
+            result.notes || 'Chụp trực tiếp từ camera và phân tích'
+          );
+        }
+
+        console.log(`[Capture] Kết quả: ${result.pest_type} (${Math.round((result.confidence || 0) * 100)}%)`);
+        res.json({
+          success: true,
+          data: result
+        });
+      } catch (parseErr) {
+        res.status(500).json({ error: 'Lỗi parse JSON: ' + parseErr.message, stdout });
+      }
+    });
+  } catch (err) {
+    console.error('[Capture] Lỗi tổng:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

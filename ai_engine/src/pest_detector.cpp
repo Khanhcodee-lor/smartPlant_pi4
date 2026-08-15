@@ -214,9 +214,18 @@ nlohmann::json PestDetector::detect(int zone_id) {
 
     // 2. Lấy frame từ Camera hoặc từ thư mục test_images/
     cv::Mat frame;
-    cv::VideoCapture cap(0);
-    if (cap.isOpened()) {
-        cap >> frame;
+    cv::VideoCapture cap;
+
+    // Ưu tiên đọc từ ustreamer snapshot (chạy ở port 8080)
+    // Dùng snapshot endpoint vì nó cho phép đọc 1 frame an toàn mà không giữ kết nối lâu
+    cap.open("http://127.0.0.1:8080/snapshot");
+    if (!cap.isOpened() || !cap.read(frame) || frame.empty()) {
+        std::cout << "[AI] ustreamer không chạy, thử mở /dev/video0 trực tiếp...\n";
+        // Fallback: Mở thiết bị /dev/video0
+        cap.open(0);
+        if (cap.isOpened()) {
+            cap >> frame;
+        }
     }
 
     if (frame.empty()) {
@@ -272,7 +281,7 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         double max_class_score;
         cv::minMaxLoc(scores, 0, &max_class_score, 0, &class_id);
 
-        if (max_class_score > 0.35) {
+        if (max_class_score > 0.60) {
             confidences.push_back(max_class_score);
             class_ids.push_back(class_id.x);
 
@@ -291,7 +300,7 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
 
     // NMS (Non-Maximum Suppression)
     std::vector<int> indices;
-    cv::dnn::NMSBoxes(boxes, confidences, 0.35, 0.4, indices);
+    cv::dnn::NMSBoxes(boxes, confidences, 0.60, 0.4, indices);
 
     if (indices.empty()) {
         std::cout << "[AI] Quét ảnh: Không phát hiện sâu bệnh (hoặc cây khỏe mạnh) ✅\n";

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
-import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory } from '../api';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, captureAndAnalyze } from '../api';
 import { Trash2 } from 'lucide-react';
 
 export default function CameraPestTab() {
@@ -13,7 +13,9 @@ export default function CameraPestTab() {
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [captureError, setCaptureError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [isLiveStreamMode, setIsLiveStreamMode] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -45,11 +47,20 @@ export default function CameraPestTab() {
     return () => clearInterval(interval);
   }, [activeTestImage]);
 
+  // Hàm tiện ích: refresh lịch sử sau khi phân tích (có delay nhỏ để DB commit)
+  const refreshHistoryAfterAnalysis = async () => {
+    await new Promise(r => setTimeout(r, 500)); // chờ DB ghi xong
+    const updatedHist = await fetchPestHistory(30);
+    setHistory(updatedHist || []);
+    setRefreshKey(Date.now());
+  };
+
   // Kích hoạt AI phân tích ảnh ngay lập tức
   const handleSelectAndAnalyze = async (filename, directUrl = null) => {
     setShowTestModal(false);
     setAnalyzing(true);
     setAnalysisResult(null);
+    setCaptureError(null);
 
     const res = await analyzeImage(filename);
     if (res?.success && res?.data) {
@@ -62,9 +73,8 @@ export default function CameraPestTab() {
       } else if (directUrl) {
         setActiveTestImage(directUrl);
       }
-      // Refresh lại lịch sử bệnh
-      const updatedHist = await fetchPestHistory(30);
-      setHistory(updatedHist || []);
+      // Refresh lịch sử bệnh
+      await refreshHistoryAfterAnalysis();
     } else {
       if (directUrl) setActiveTestImage(directUrl);
     }
@@ -104,6 +114,29 @@ export default function CameraPestTab() {
     }
   };
 
+  const handleCaptureCamera = async () => {
+    setAnalyzing(true);
+    setAnalysisResult(null);
+    setCaptureError(null);
+    // Giữ livestream trong lúc phân tích, chỉ tắt sau khi có kết quả
+    
+    const res = await captureAndAnalyze();
+    if (res?.success && res?.data) {
+      setIsLiveStreamMode(false); // Tắt livestream để hiện kết quả
+      setAnalysisResult(res.data);
+      if (res.data.image_b64) setActiveTestImage(res.data.image_b64);
+      else if (res.data.image_path) setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
+      
+      // Refresh lịch sử bệnh
+      await refreshHistoryAfterAnalysis();
+    } else {
+      setCaptureError('Không thể chụp ảnh hoặc AI phân tích lỗi. Vui lòng thử lại.');
+      // Tự động ẩn lỗi sau 5 giây
+      setTimeout(() => setCaptureError(null), 5000);
+    }
+    setAnalyzing(false);
+  };
+
 
   const severityConfig = {
     critical: { label: 'Nghiêm trọng', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' },
@@ -137,14 +170,43 @@ export default function CameraPestTab() {
             </p>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
+            {/* Chụp trực tiếp */}
+            <button 
+              onClick={handleCaptureCamera}
+              disabled={analyzing}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 transition-colors shadow-sm disabled:opacity-50"
+              title="Chụp 1 kiểu ảnh từ webcam và ném cho AI nhận diện ngay"
+            >
+              <Camera className="w-4 h-4 text-rose-600" />
+              <span>Chụp & Nhận diện ngay</span>
+            </button>
+
+            <button 
+              onClick={() => {
+                setIsLiveStreamMode(!isLiveStreamMode);
+                if (isLiveStreamMode) {
+                  // Đang tắt live -> bật live, clear ảnh test
+                  setActiveTestImage(null);
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 font-bold text-xs rounded-lg border transition-colors shadow-sm ${
+                isLiveStreamMode 
+                ? 'bg-blue-600 text-white border-blue-700' 
+                : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+              }`}
+            >
+              <Video className="w-4 h-4" />
+              <span>{isLiveStreamMode ? '🔴 Tắt Livestream' : 'Bật Livestream'}</span>
+            </button>
+
             <button 
               onClick={() => setShowTestModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs rounded-lg border border-emerald-200 transition-colors shadow-sm"
               title="Chọn ảnh trong thẻ nhớ của Pi"
             >
               <FolderOpen className="w-4 h-4 text-emerald-600" />
-              <span>Chọn ảnh trong thẻ nhớ ({testImages.length})</span>
+              <span>Thẻ nhớ ({testImages.length})</span>
             </button>
 
             <button 
@@ -205,19 +267,45 @@ export default function CameraPestTab() {
           </div>
         )}
 
+        {/* Error Banner */}
+        {captureError && (
+          <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between animate-fade-in-up">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <p className="text-xs font-bold text-slate-900">{captureError}</p>
+            </div>
+            <button 
+              onClick={() => setCaptureError(null)}
+              className="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <div className="relative w-full h-[45vh] sm:h-[55vh] md:h-[65vh] 2xl:h-[70vh] bg-slate-900 rounded-xl overflow-hidden group shadow-inner">
-          {/* Active Image (Test image or latest detection or fallback) */}
-          <img 
-            src={activeTestImage || `/latest_detection.jpg?t=${refreshKey}`} 
-            alt="AI Detection Feed"
-            onError={(e) => {
-              // Fallback nếu chưa có latest_detection.jpg
-              if (!activeTestImage) {
+          {/* Active Image (Livestream OR Test image OR fallback) */}
+          {isLiveStreamMode ? (
+            <img 
+              src={`/api/camera/stream`} 
+              alt="Camera Live Stream"
+              className="w-full h-full object-contain bg-slate-950"
+              onError={(e) => {
                 e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
-              }
-            }}
-            className="w-full h-full object-contain bg-slate-950"
-          />
+              }}
+            />
+          ) : (
+            <img 
+              src={activeTestImage || `/latest_detection.jpg?t=${refreshKey}`} 
+              alt="AI Detection Feed"
+              onError={(e) => {
+                if (!activeTestImage) {
+                  e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
+                }
+              }}
+              className="w-full h-full object-contain bg-slate-950"
+            />
+          )}
 
           {/* Analyzing Spinner Overlay */}
           {analyzing && (
@@ -225,6 +313,27 @@ export default function CameraPestTab() {
               <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
               <p className="font-bold text-sm tracking-wide">Đang chạy mô hình AI YOLOv8...</p>
               <p className="text-xs text-slate-300 mt-1">Đang phân tích và vẽ khung nhận diện bệnh trên ảnh</p>
+            </div>
+          )}
+
+          {/* Nút Chụp nổi trên Livestream */}
+          {isLiveStreamMode && !analyzing && (
+            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20">
+              <button
+                onClick={handleCaptureCamera}
+                className="group relative flex items-center justify-center w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border-4 border-white/80 hover:border-white hover:scale-110 active:scale-95 transition-all duration-200 shadow-lg hover:shadow-xl"
+                title="Chụp ảnh & Phân tích AI"
+              >
+                {/* Vòng tròn ngoài pulse */}
+                <span className="absolute inset-0 rounded-full border-2 border-white/40 animate-ping" style={{ animationDuration: '2s' }} />
+                {/* Nút bên trong */}
+                <span className="w-10 h-10 rounded-full bg-rose-500 group-hover:bg-rose-400 transition-colors shadow-inner flex items-center justify-center">
+                  <Camera className="w-5 h-5 text-white" />
+                </span>
+              </button>
+              <p className="text-center text-[10px] text-white/70 font-semibold mt-1.5 tracking-wide">
+                BẤM ĐỂ CHỤP & PHÂN TÍCH
+              </p>
             </div>
           )}
 
