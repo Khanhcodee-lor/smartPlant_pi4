@@ -13,6 +13,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+# Find OpenCV
+find_package(OpenCV REQUIRED)
+
 # Source files
 set(SOURCES
     src/main.cpp
@@ -26,10 +29,12 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
+    ${OpenCV_LIBS}
 )
 
 # Compiler warnings
