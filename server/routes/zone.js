@@ -13,8 +13,14 @@ router.get('/', (req, res) => {
         (SELECT COUNT(*) FROM pest_detections WHERE zone_id = z.id) as pest_count,
         (SELECT temperature FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_temp,
         (SELECT humidity FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_humidity,
-        (SELECT soil_moisture FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_soil_moisture
+        (SELECT soil_moisture FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_soil_moisture,
+        bn.name as node_name,
+        bn.mesh_address as node_mesh_address,
+        bn.status as node_status,
+        bn.last_seen as node_last_seen,
+        bn.uuid as node_uuid
       FROM zones z
+      LEFT JOIN ble_nodes bn ON bn.zone_id = z.id
       ORDER BY z.name
     `).all();
 

@@ -1,4 +1,4 @@
-import { Thermometer, Droplets, Sprout, Activity } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Activity, Bluetooth } from 'lucide-react';
 
 export default function ZoneCard({ zone, delay = 0 }) {
   const statusConfig = {
@@ -63,6 +63,9 @@ export default function ZoneCard({ zone, delay = 0 }) {
     },
   ];
 
+  const hasNode = zone.node_name || zone.node_mesh_address;
+  const nodeActive = zone.node_status === 'active' || zone.node_status === 'provisioned';
+
   return (
     <div
       className="glass-panel glass-panel-hover p-5 sm:p-6 cursor-default relative overflow-hidden group"
@@ -85,6 +88,27 @@ export default function ZoneCard({ zone, delay = 0 }) {
           <span className={`w-1.5 h-1.5 rounded-full ${status.dotColor} animate-pulse`} />
           {status.label}
         </span>
+      </div>
+
+      {/* BLE Node Info */}
+      <div className={`mb-4 px-3 py-2.5 rounded-xl border text-xs relative z-10 ${
+        hasNode
+          ? nodeActive
+            ? 'bg-blue-50/50 border-blue-100 text-blue-700'
+            : 'bg-slate-50 border-slate-100 text-slate-500'
+          : 'bg-slate-50/50 border-dashed border-slate-200 text-slate-400'
+      }`}>
+        <div className="flex items-center gap-2">
+          <Bluetooth className={`w-3.5 h-3.5 shrink-0 ${hasNode ? nodeActive ? 'text-blue-500' : 'text-slate-400' : 'text-slate-300'}`} />
+          {hasNode ? (
+            <div className="flex items-center justify-between w-full">
+              <span className="font-semibold">{zone.node_name || 'ESP32 Node'}</span>
+              <span className="font-mono text-[10px] opacity-70">{zone.node_mesh_address || ''}</span>
+            </div>
+          ) : (
+            <span className="italic">Chưa gán Node ESP32</span>
+          )}
+        </div>
       </div>
 
       {/* Metrics with Progress Bars */}

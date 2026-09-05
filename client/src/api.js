@@ -154,3 +154,95 @@ export async function captureAndAnalyze() {
     return null;
   }
 }
+
+/** Get current WiFi status — GET /api/wifi/status */
+export async function getWifiStatus() {
+  const result = await apiFetch('/wifi/status');
+  return result;
+}
+
+/** Scan for WiFi networks — GET /api/wifi/scan */
+export async function scanWifi() {
+  const result = await apiFetch('/wifi/scan');
+  return result || [];
+}
+
+/** Connect to a WiFi network — POST /api/wifi/connect */
+export async function connectWifi(ssid, password) {
+  try {
+    const res = await fetch(`${API_BASE}/wifi/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid, password })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to connect');
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[API] connectWifi:', err.message);
+    throw err;
+  }
+}
+
+/** Get BLE Mesh gateway status — GET /api/ble/status */
+export async function getBleStatus() {
+  const result = await apiFetch('/ble/status');
+  return result?.data || { state: 'not_started' };
+}
+
+/** Get all BLE Mesh nodes — GET /api/ble/nodes */
+export async function getBleNodes() {
+  const result = await apiFetch('/ble/nodes');
+  return result?.data || [];
+}
+
+/** Trigger scan for unprovisioned BLE devices — POST /api/ble/scan */
+export async function scanBleDevices() {
+  try {
+    const res = await fetch(`${API_BASE}/ble/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('Scan Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] scanBleDevices:', err.message);
+    return null;
+  }
+}
+
+/** Assign a BLE node to a zone — POST /api/ble/nodes/:id/assign-zone */
+export async function assignNodeToZone(nodeId, zoneId) {
+  try {
+    const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}/assign-zone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zone_id: zoneId })
+    });
+    if (!res.ok) throw new Error('Assign Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] assignNodeToZone:', err.message);
+    return null;
+  }
+}
+
+/** Remove a BLE node — DELETE /api/ble/nodes/:id */
+export async function removeBleNode(nodeId) {
+  try {
+    const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete Error');
+    return await res.json();
+  } catch (err) {
+    console.error('[API] removeBleNode:', err.message);
+    return null;
+  }
+}
+
+/** Get zones with BLE mesh assignments — GET /api/ble/zones */
+export async function getBleZones() {
+  const result = await apiFetch('/ble/zones');
+  return result?.data || [];
+}

@@ -9,6 +9,8 @@ const pestRoutes = require('./routes/pest');
 const zoneRoutes = require('./routes/zone');
 const chatRoutes = require('./routes/chat');
 const cameraRoutes = require('./routes/camera');
+const wifiRoutes = require('./routes/wifi');
+const bleRoutes = require('./routes/ble');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +29,8 @@ app.use('/api/pests', pestRoutes);
 app.use('/api/zones', zoneRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/camera', cameraRoutes);
+app.use('/api/wifi', wifiRoutes);
+app.use('/api/ble', bleRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

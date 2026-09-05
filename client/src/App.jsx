@@ -9,6 +9,8 @@ import ZoneCard from './components/ZoneCard';
 import PestTable from './components/PestTable';
 import CameraPestTab from './components/CameraPestTab';
 import ChatbotTab from './components/ChatbotTab';
+import WifiConfigTab from './components/WifiConfigTab';
+import BleMeshTab from './components/BleMeshTab';
 
 import {
   fetchHealth,
@@ -185,6 +187,14 @@ export default function App() {
 
             {activeTab === 'chat' && (
               <ChatbotTab />
+            )}
+
+            {activeTab === 'wifi' && (
+              <WifiConfigTab />
+            )}
+
+            {activeTab === 'ble' && (
+              <BleMeshTab />
             )}
 
             {/* Footer */}

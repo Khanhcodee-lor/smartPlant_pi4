@@ -59,10 +59,27 @@ function initDatabase() {
       name TEXT NOT NULL UNIQUE,
       description TEXT,
       status TEXT DEFAULT 'active',
+      mesh_address TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // BLE Mesh nodes table
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ble_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT NOT NULL UNIQUE,
+      mesh_address TEXT,
+      name TEXT,
+      zone_id INTEGER,
+      status TEXT DEFAULT 'unprovisioned',
+      last_seen DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (zone_id) REFERENCES zones(id)
+    )
+  `);
+
 
   // Create indexes for performance
   database.exec(`
@@ -72,23 +89,9 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_pest_zone ON pest_detections(zone_id);
   `);
 
-  // Auto-seed default zones & initial data if empty
-  const zoneCount = database.prepare('SELECT COUNT(*) as count FROM zones').get();
-  if (zoneCount.count === 0) {
-    console.log('🌱 Database is empty. Seeding initial zones & data...');
-    const insertZone = database.prepare('INSERT INTO zones (name, description, status) VALUES (?, ?, ?)');
-    const z1 = insertZone.run('Khu A - Rau ăn lá', 'Trồng rau muống, cải, xà lách', 'active').lastInsertRowid;
-    const z2 = insertZone.run('Khu B - Cà chua', 'Trồng cà chua bi và cà chua thường', 'active').lastInsertRowid;
-    const z3 = insertZone.run('Khu C - Ớt & Dưa', 'Trồng ớt chỉ thiên, dưa leo', 'active').lastInsertRowid;
-    const z4 = insertZone.run('Khu D - Vườn ươm', 'Khu vực ươm giống mới', 'maintenance').lastInsertRowid;
-
-    const zoneIds = [z1, z2, z3, z4];
-
-    console.log('✅ Auto-seeding zones completed');
-
-    console.log('✅ Auto-seeding completed');
-  }
-
+  // Zones are created dynamically when ESP32 nodes join the BLE Mesh network.
+  // No auto-seeding needed.
+  
   console.log('✅ Database initialized successfully');
 }
 
