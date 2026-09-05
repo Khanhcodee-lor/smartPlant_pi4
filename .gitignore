@@ -21,9 +21,6 @@ server/.env
 .DS_Store
 Thumbs.db
 
-# === Scripts ===
-deploy.sh
-
 # === Build Artifacts ===
 server/dist/
 client/dist/

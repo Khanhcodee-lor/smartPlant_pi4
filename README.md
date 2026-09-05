@@ -55,13 +55,13 @@ Smart_Plant/
 
 ## ⚙️ Yêu cầu hệ thống
 
-| Thành phần | Yêu cầu |
-|------------|----------|
-| OS | Ubuntu / Raspberry Pi OS (64-bit) |
-| C++ | GCC ≥ 10 (hỗ trợ C++17) |
-| CMake | ≥ 3.16 |
-| Node.js | ≥ 18 (khuyến nghị v20 LTS) |
-| npm | ≥ 8 |
+| Thành phần | Yêu cầu                           |
+| ---------- | --------------------------------- |
+| OS         | Ubuntu / Raspberry Pi OS (64-bit) |
+| C++        | GCC ≥ 10 (hỗ trợ C++17)           |
+| CMake      | ≥ 3.16                            |
+| Node.js    | ≥ 18 (khuyến nghị v20 LTS)        |
+| npm        | ≥ 8                               |
 
 ### Kiểm tra phiên bản
 
@@ -90,6 +90,58 @@ nvm install 20
 
 ## 🚀 Hướng dẫn Build & Chạy
 
+### Gửi code lên GitHub
+
+Máy phát triển không cần kết nối trực tiếp tới Pi. Sau khi commit code, chạy:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+Script chỉ push branch hiện tại lên `origin`, không dùng SSH tới Pi và không cần biết IP Pi.
+Nếu còn file chưa commit, script sẽ dừng để tránh đẩy nhầm code.
+
+### Build trên máy bên họ và SCP sang Pi
+
+Máy bên họ cần là Linux và có cross-compiler ARM64, Node.js, CMake, SSH và `rsync`:
+
+```bash
+sudo apt update
+sudo apt install -y g++-aarch64-linux-gnu gcc-aarch64-linux-gnu cmake rsync
+git pull --ff-only origin main
+PUSH_ONLY=0 REMOTE_BUILD=0 ./deploy.sh 10.42.0.187 khanhpi /home/khanhpi/Smart_Plant
+```
+
+Lệnh trên sẽ build C++ ARM64, build frontend, đóng gói server rồi dùng `scp`/`rsync` đẩy artifact sang Pi. Pi không cần build source code.
+
+Pi chỉ cần cài Node.js, OpenCV runtime và PM2 một lần:
+
+```bash
+sudo apt update
+sudo apt install -y libopencv-dev
+npm install -g pm2
+```
+
+Nếu build lỗi, phía Pi gửi log:
+
+```bash
+pm2 status
+pm2 logs --lines 100
+tail -n 100 ~/Smart_Plant/server.log
+tail -n 100 ~/Smart_Plant/ai_engine.log
+```
+
+Lần đầu trên Pi, cài dependency hệ thống:
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential cmake libopencv-dev
+npm install -g pm2
+```
+
+Chế độ Pi tự pull và build qua SSH vẫn có thể bật thủ công bằng `PUSH_ONLY=0 REMOTE_BUILD=1 ./deploy.sh`, nhưng không cần dùng trong workflow này.
+
 ### 1. Clone dự án
 
 ```bash
@@ -100,6 +152,7 @@ cd Smart_Plant
 ### 2. Build & Chạy Web Application
 
 #### a. Build & Run Frontend (React + Vite)
+
 ```bash
 cd client
 npm install
@@ -109,6 +162,7 @@ npm run build    # Xuất file tĩnh ra dist/ và copy sang server/public/
 ```
 
 #### b. Build & Run Web Server (Node.js)
+
 ```bash
 cd server
 npm install
@@ -119,6 +173,7 @@ npm run dev      # Chạy server (development mode tại http://localhost:3000)
 Server sẽ chạy tại: `http://0.0.0.0:3000`
 
 > **Lưu ý:** Nếu dùng NVM, mỗi lần mở terminal mới cần load NVM trước:
+>
 > ```bash
 > export NVM_DIR="$HOME/.nvm" && source "$NVM_DIR/nvm.sh"
 > ```
@@ -159,13 +214,13 @@ cd ai_engine/build
 
 **Các tham số:**
 
-| Tham số | Mặc định | Mô tả |
-|---------|----------|-------|
-| `--server-url` | `http://localhost:3000` | URL web server |
-| `--sensor-interval` | `5` | Gửi sensor data mỗi N giây |
-| `--pest-interval` | `30` | Chạy pest detection mỗi N giây |
-| `--zones` | `4` | Số khu vực vườn |
-| `-h`, `--help` | | Hiện trợ giúp |
+| Tham số             | Mặc định                | Mô tả                          |
+| ------------------- | ----------------------- | ------------------------------ |
+| `--server-url`      | `http://localhost:3000` | URL web server                 |
+| `--sensor-interval` | `5`                     | Gửi sensor data mỗi N giây     |
+| `--pest-interval`   | `30`                    | Chạy pest detection mỗi N giây |
+| `--zones`           | `4`                     | Số khu vực vườn                |
+| `-h`, `--help`      |                         | Hiện trợ giúp                  |
 
 ### 5. Xem Dashboard
 
@@ -185,35 +240,35 @@ Trên chính Pi: `http://localhost:3000`
 
 ### Sensor API
 
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
-| `GET` | `/api/sensors/latest` | Dữ liệu cảm biến mới nhất |
-| `GET` | `/api/sensors/latest-by-zone` | Mới nhất theo từng zone |
-| `GET` | `/api/sensors/history?hours=24` | Lịch sử N giờ |
-| `POST` | `/api/sensors` | Ghi reading mới |
+| Method | Endpoint                        | Mô tả                     |
+| ------ | ------------------------------- | ------------------------- |
+| `GET`  | `/api/sensors/latest`           | Dữ liệu cảm biến mới nhất |
+| `GET`  | `/api/sensors/latest-by-zone`   | Mới nhất theo từng zone   |
+| `GET`  | `/api/sensors/history?hours=24` | Lịch sử N giờ             |
+| `POST` | `/api/sensors`                  | Ghi reading mới           |
 
 ### Pest Detection API
 
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
-| `GET` | `/api/pests/latest?limit=10` | Phát hiện gần đây |
-| `GET` | `/api/pests/history?days=7` | Lịch sử N ngày |
-| `GET` | `/api/pests/stats` | Thống kê theo loại/mức độ |
-| `POST` | `/api/pests` | Ghi kết quả phát hiện |
+| Method | Endpoint                     | Mô tả                     |
+| ------ | ---------------------------- | ------------------------- |
+| `GET`  | `/api/pests/latest?limit=10` | Phát hiện gần đây         |
+| `GET`  | `/api/pests/history?days=7`  | Lịch sử N ngày            |
+| `GET`  | `/api/pests/stats`           | Thống kê theo loại/mức độ |
+| `POST` | `/api/pests`                 | Ghi kết quả phát hiện     |
 
 ### Zone API
 
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
-| `GET` | `/api/zones` | Danh sách khu vực |
-| `GET` | `/api/zones/:id` | Chi tiết khu vực |
-| `POST` | `/api/zones` | Tạo khu vực mới |
-| `PUT` | `/api/zones/:id` | Cập nhật khu vực |
+| Method | Endpoint         | Mô tả             |
+| ------ | ---------------- | ----------------- |
+| `GET`  | `/api/zones`     | Danh sách khu vực |
+| `GET`  | `/api/zones/:id` | Chi tiết khu vực  |
+| `POST` | `/api/zones`     | Tạo khu vực mới   |
+| `PUT`  | `/api/zones/:id` | Cập nhật khu vực  |
 
 ### Chat API
 
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
+| Method | Endpoint    | Mô tả                                                     |
+| ------ | ----------- | --------------------------------------------------------- |
 | `POST` | `/api/chat` | Gửi tin nhắn cho Trợ lý AI (body: `{ "message": "..." }`) |
 
 ### Ví dụ gửi dữ liệu bằng curl
