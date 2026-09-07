@@ -108,6 +108,7 @@ cp -r dist/* "$PI_DIR/server/public/"
 echo "[2/4] Cài dependency server..."
 cd "$PI_DIR/server"
 npm install --omit=dev
+node -e "require('./db/database').initDatabase()"
 
 echo "[3/4] Build AI engine..."
 cd "$PI_DIR/ai_engine"
@@ -119,7 +120,7 @@ if command -v pm2 >/dev/null 2>&1; then
   pm2 delete smart-plant-engine smart-plant-server smart-plant-ble 2>/dev/null || true
   pm2 start "$PI_DIR/ai_engine/build/smart_plant_engine" --name smart-plant-engine
   pm2 start "$PI_DIR/server/server.js" --name smart-plant-server --cwd "$PI_DIR/server"
-  pm2 start "$PI_DIR/ai_engine/ble_mesh_gateway.py" --name smart-plant-ble --interpreter python3 --cwd "$PI_DIR/ai_engine"
+  pm2 start "$PI_DIR/ai_engine/ble_mesh_gateway.py" --name smart-plant-ble --interpreter /usr/bin/python3 --cwd "$PI_DIR/ai_engine"
   pm2 save
 else
   echo "Cảnh báo: chưa có pm2, khởi động bằng nohup. Cài bằng: npm install -g pm2"
@@ -127,6 +128,8 @@ else
   pkill -f "node server.js" 2>/dev/null || true
   nohup "$PI_DIR/ai_engine/build/smart_plant_engine" > "$PI_DIR/ai_engine.log" 2>&1 &
   (cd "$PI_DIR/server" && nohup node server.js > "$PI_DIR/server.log" 2>&1 &)
+  pkill -f "ble_mesh_gateway.py" 2>/dev/null || true
+  nohup /usr/bin/python3 "$PI_DIR/ai_engine/ble_mesh_gateway.py" > "$PI_DIR/ble_mesh.log" 2>&1 &
 fi
 REMOTE_SCRIPT
 
@@ -216,7 +219,7 @@ rsync -avz --delete "${SERVER_DIR}/public/" "${PI_USER}@${PI_IP}:${PI_DIR}/serve
 
 # Push BLE Mesh Gateway (Python script)
 echo -e "  -> Đẩy BLE Mesh Gateway script..."
-scp "${AI_ENGINE_DIR}/ble_mesh_gateway.py" "${PI_USER}@${PI_IP}:${PI_DIR}/ai_engine/"
+scp "${AI_ENGINE_DIR}/ble_mesh_gateway.py" "${AI_ENGINE_DIR}/ble_mesh_protocol.py" "${PI_USER}@${PI_IP}:${PI_DIR}/ai_engine/"
 
 # 7. Start Remote Application
 echo -e "${GREEN}🔄 [5/5] Khởi động ứng dụng trên Raspberry Pi...${NC}"
@@ -228,9 +231,11 @@ ssh "${PI_USER}@${PI_IP}" "bash -s" << EOF
   mkdir -p ${PI_DIR}/server/build/Release
   cp node_modules/better-sqlite3/build/Release/better_sqlite3.node ${PI_DIR}/server/build/Release/ 2>/dev/null || true
 
+  node -e "require('./db/database').initDatabase()"
+
   echo "  -> Cấp quyền thực thi..."
   chmod +x ${PI_DIR}/ai_engine/${BINARY_ENGINE} 2>/dev/null || true
-  chmod +x ${PI_DIR}/ble_mesh_gateway.py 2>/dev/null || true
+  chmod +x ${PI_DIR}/ai_engine/ble_mesh_gateway.py 2>/dev/null || true
 
   echo "  -> Khởi chạy Smart Plant System..."
   pkill -f "${BINARY_ENGINE}" || true
@@ -247,10 +252,10 @@ ssh "${PI_USER}@${PI_IP}" "bash -s" << EOF
     fi
     
     # Start Web Server
-    pm2 restart smart-plant-server || pm2 start ${PI_DIR}/server/index.js --name "smart-plant-server" || true
+    pm2 restart smart-plant-server || pm2 start ${PI_DIR}/server/server.js --name "smart-plant-server" || true
     
     # Start BLE Gateway
-    pm2 restart smart-plant-ble || pm2 start ble_mesh_gateway.py --interpreter python3 --cwd ${PI_DIR}/ai_engine --name "smart-plant-ble" || true
+    pm2 restart smart-plant-ble || pm2 start ble_mesh_gateway.py --interpreter /usr/bin/python3 --cwd ${PI_DIR}/ai_engine --name "smart-plant-ble" || true
     
     pm2 save
   else
@@ -258,9 +263,9 @@ ssh "${PI_USER}@${PI_IP}" "bash -s" << EOF
     cd ${PI_DIR}
     nohup ${PI_DIR}/ai_engine/${BINARY_ENGINE} > ai_engine.log 2>&1 &
     cd ${PI_DIR}/server
-    nohup node index.js > ../server.log 2>&1 &
+    nohup node server.js > ../server.log 2>&1 &
     cd ${PI_DIR}/ai_engine
-    nohup python3 ble_mesh_gateway.py > ../ble_mesh.log 2>&1 &
+    nohup /usr/bin/python3 ble_mesh_gateway.py > ../ble_mesh.log 2>&1 &
   fi
 
   echo "  ✓ Hệ thống đã khởi chạy thành công trên Pi!"

@@ -1,25 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
-const fs = require('fs');
 const { getDb } = require('../db/database');
-const { exec } = require('child_process');
+const net = require('net');
 
-// Path to BLE Mesh status file (written by Python gateway)
-const STATUS_FILE = path.join(__dirname, '..', '..', 'ble_mesh_status.json');
 
 // GET /api/ble/status - Get BLE Mesh gateway status
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   try {
-    if (fs.existsSync(STATUS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf-8'));
-      res.json({ success: true, data });
-    } else {
-      res.json({ success: true, data: { state: 'not_started' } });
-    }
+    const result = await gatewayCommand({ action: 'status' });
+    res.json(result);
   } catch (error) {
-    console.error('Error reading BLE status:', error);
-    res.status(500).json({ error: 'Failed to read BLE status' });
+    res.json({ success: true, data: { state: 'not_started', ready: false, error: error.message } });
   }
 });
 
@@ -67,27 +59,47 @@ router.post('/nodes/:id/assign-zone', (req, res) => {
   }
 });
 
-// POST /api/ble/scan - Trigger scan for unprovisioned devices
-router.post('/scan', (req, res) => {
-  try {
-    // Write a scan command to status file that the Python gateway can pick up
-    // Or directly trigger via D-Bus
-    exec('dbus-send --system --dest=org.bluez.mesh --type=method_call /org/bluez/mesh org.bluez.mesh.Network1.UnprovisionedScan uint16:30',
-      (error, stdout, stderr) => {
-        if (error) {
-          console.error('Scan trigger error:', error.message);
-          // Fallback: just update status for the gateway to pick up
-          res.json({ success: true, message: 'Scan request sent (gateway will handle)' });
-        } else {
-          res.json({ success: true, message: 'Scanning for unprovisioned devices...' });
-        }
-      }
-    );
-  } catch (error) {
-    console.error('Error triggering scan:', error);
-    res.status(500).json({ error: 'Failed to trigger scan' });
-  }
-});
+// Commands must come from the process that owns the BlueZ attachment.
+const SOCKET_PATH = process.env.MESH_SOCKET_PATH || path.join(__dirname, '..', '..', 'ble_mesh.sock');
+function gatewayCommand(command) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(SOCKET_PATH);
+    let buffer = '';
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error) reject(error); else resolve(result);
+    };
+    socket.setTimeout(5000, () => finish(new Error('Gateway timed out')));
+    socket.on('error', () => finish(new Error('BLE gateway unavailable; check Python process and socket permissions')));
+    socket.on('connect', () => socket.write(JSON.stringify(command) + '\n'));
+    socket.on('data', (data) => {
+      buffer += data.toString();
+      if (buffer.length > 65536) return finish(new Error('Invalid gateway response'));
+      if (!buffer.includes('\n')) return;
+      try { finish(null, JSON.parse(buffer.split('\n')[0])); }
+      catch { finish(new Error('Invalid gateway response')); }
+    });
+    socket.on('end', () => finish(new Error('Gateway closed without a response')));
+  });
+}
+
+for (const action of ['scan', 'provision', 'configure']) {
+  router.post(`/${action}`, async (req, res) => {
+    const uuid = req.body?.uuid;
+    if (action !== 'scan' && (typeof uuid !== 'string' || !/^[0-9a-f]{32}$/i.test(uuid))) {
+      return res.status(400).json({ error: 'uuid must contain 32 hexadecimal characters' });
+    }
+    try {
+      const result = await gatewayCommand({ action, uuid });
+      res.status(result.success ? 202 : 409).json(result);
+    } catch (error) {
+      res.status(503).json({ success: false, error: error.message });
+    }
+  });
+}
 
 // GET /api/ble/zones - Get zones with their mesh assignments
 router.get('/zones', (req, res) => {

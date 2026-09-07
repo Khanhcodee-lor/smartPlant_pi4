@@ -5,6 +5,8 @@ Hệ thống giám sát khu vườn thông minh trên Raspberry Pi 4.
 - **AI Engine** (C++) — Đọc cảm biến + phát hiện sâu bệnh
 - **Web Server** (Node.js) — REST API + Dashboard hiển thị dữ liệu
 
+Hướng dẫn gateway Python trên Pi và giao thức ESP-IDF: [BLE_MESH.md](BLE_MESH.md).
+
 ## 📁 Cấu trúc dự án
 
 ```

@@ -198,20 +198,20 @@ export async function getBleNodes() {
   return result?.data || [];
 }
 
-/** Trigger scan for unprovisioned BLE devices — POST /api/ble/scan */
-export async function scanBleDevices() {
-  try {
-    const res = await fetch(`${API_BASE}/ble/scan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) throw new Error('Scan Error');
-    return await res.json();
-  } catch (err) {
-    console.error('[API] scanBleDevices:', err.message);
-    return null;
-  }
+async function bleCommand(action, uuid) {
+  const res = await fetch(`${API_BASE}/ble/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uuid }),
+  });
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'BLE command failed');
+  return result;
 }
+
+export const scanBleDevices = () => bleCommand('scan');
+export const provisionBleDevice = (uuid) => bleCommand('provision', uuid);
+export const configureBleDevice = (uuid) => bleCommand('configure', uuid);
 
 /** Assign a BLE node to a zone — POST /api/ble/nodes/:id/assign-zone */
 export async function assignNodeToZone(nodeId, zoneId) {

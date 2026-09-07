@@ -24,3 +24,10 @@ Thumbs.db
 # === Build Artifacts ===
 server/dist/
 client/dist/
+
+# BLE Mesh credentials and runtime files
+ai_engine/mesh_state/
+ai_engine/mesh_token.dat
+ble_mesh_status.json*
+ble_mesh.sock*
+__pycache__/

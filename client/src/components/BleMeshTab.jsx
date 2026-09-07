@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Bluetooth, RefreshCw, Radio, Cpu, MapPin, Trash2, CheckCircle2, AlertCircle, Zap, Circle } from 'lucide-react';
-import { getBleStatus, getBleNodes, scanBleDevices, assignNodeToZone, removeBleNode, fetchZones } from '../api';
+import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, removeBleNode, fetchZones } from '../api';
 
 export default function BleMeshTab() {
   const [status, setStatus] = useState({ state: 'not_started' });
@@ -38,6 +38,18 @@ export default function BleMeshTab() {
 
 
 
+  const handleMeshCommand = async (command) => {
+    setError('');
+    setSuccessMsg('');
+    try {
+      await command();
+      await loadData();
+      setSuccessMsg('Đã nhận yêu cầu. Xem trạng thái gateway để biết kết quả.');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const handleAssign = async (nodeId, zoneId) => {
     try {
       await assignNodeToZone(nodeId, zoneId);
@@ -49,7 +61,7 @@ export default function BleMeshTab() {
   };
 
   const handleRemove = async (nodeId) => {
-    if (!confirm('Bạn có chắc muốn xóa Node này?')) return;
+    if (!confirm('Xóa bản ghi trên dashboard? ESP vẫn thuộc mạng mesh; thao tác này không reset ESP.')) return;
     try {
       await removeBleNode(nodeId);
       setSuccessMsg('Đã xóa Node.');
@@ -61,6 +73,9 @@ export default function BleMeshTab() {
 
   const getStateColor = (state) => {
     const colors = {
+      'scanning': 'cyan',
+      'node_configured': 'emerald',
+      'configuration_failed': 'red',
       'attached': 'emerald',
       'joined': 'emerald',
       'starting': 'amber',
@@ -75,6 +90,13 @@ export default function BleMeshTab() {
 
   const getStateLabel = (state) => {
     const labels = {
+      'scanning': 'Đang quét thiết bị',
+      'provisioning': 'Đang cấp mạng cho ESP',
+      'configuring': 'Đang cấu hình model',
+      'node_configured': 'Node đã sẵn sàng gửi dữ liệu',
+      'configuration_failed': 'Cấu hình thất bại',
+      'provision_failed': 'Cấp mạng thất bại',
+      'scan_failed': 'Quét thất bại',
       'attached': 'Đã kết nối mạng Mesh',
       'joined': 'Đã tham gia mạng',
       'starting': 'Đang khởi động...',
@@ -95,6 +117,10 @@ export default function BleMeshTab() {
           <p className="text-sm text-slate-500 mt-1">Quản lý mạng lưới cảm biến ESP32 không dây</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => handleMeshCommand(scanBleDevices)} disabled={!status.ready}
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm disabled:opacity-50">
+            Quét ESP32
+          </button>
 
           <button
             onClick={loadData}
@@ -137,6 +163,7 @@ export default function BleMeshTab() {
                 <p className="text-xs text-slate-500">Chip: Bluetooth 5.0 (Pi4 Internal)</p>
               </div>
             </div>
+            {status.error && <p className="text-sm text-red-600">{status.error}</p>}
             {status.bluetooth_mac && (
               <p className="text-xs text-slate-500 font-mono px-1">MAC: {status.bluetooth_mac}</p>
             )}
@@ -155,12 +182,25 @@ export default function BleMeshTab() {
               <p className="text-xs text-slate-500 mt-1">Tổng Node</p>
             </div>
             <div className="text-center p-4 bg-emerald-50 rounded-xl">
-              <p className="text-3xl font-bold text-emerald-600">{nodes.filter(n => n.status === 'active' || n.status === 'provisioned').length}</p>
+              <p className="text-3xl font-bold text-emerald-600">{nodes.filter(n => n.status === 'active').length}</p>
               <p className="text-xs text-slate-500 mt-1">Đang hoạt động</p>
             </div>
           </div>
         </div>
       </div>
+
+      {(status.devices || []).length > 0 && (
+        <div className="glass-panel p-6 space-y-3">
+          <h3 className="font-semibold">ESP32 chưa gia nhập mạng</h3>
+          {status.devices.map(device => (
+            <div key={device.uuid} className="flex items-center justify-between gap-3">
+              <span className="font-mono text-xs">{device.uuid} · {device.rssi} dBm</span>
+              <button onClick={() => handleMeshCommand(() => provisionBleDevice(device.uuid))}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">Thêm vào mạng</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Nodes Table */}
       <div className="glass-panel p-6">
@@ -172,7 +212,7 @@ export default function BleMeshTab() {
           <div className="text-center py-12 text-slate-500">
             <Radio className="w-12 h-12 mx-auto mb-4 text-slate-300" />
             <p className="font-medium">Chưa có Node nào trong mạng Mesh</p>
-            <p className="text-sm mt-1">Hệ thống sẽ tự động phát hiện và thêm Node khi bạn bật nguồn ESP32.</p>
+            <p className="text-sm mt-1">Bật ESP32 có firmware BLE Mesh, nhấn Quét ESP32 rồi chọn UUID để thêm vào mạng.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -223,10 +263,12 @@ export default function BleMeshTab() {
                       {node.last_seen ? new Date(node.last_seen).toLocaleString('vi-VN') : '---'}
                     </td>
                     <td className="py-3">
+                      <button onClick={() => handleMeshCommand(() => configureBleDevice(node.uuid))}
+                        className="text-xs text-blue-600 mr-2">Cấu hình lại</button>
                       <button
                         onClick={() => handleRemove(node.id)}
                         className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Xóa Node"
+                        title="Xóa bản ghi Node (không reset ESP)"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
