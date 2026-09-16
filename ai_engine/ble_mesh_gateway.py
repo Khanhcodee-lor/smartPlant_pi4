@@ -28,6 +28,7 @@ STATE_DIR = Path(os.environ.get('MESH_STATE_DIR', ROOT / 'ai_engine' / 'mesh_sta
 SOCKET_PATH = os.environ.get('MESH_SOCKET_PATH', str(ROOT / 'ble_mesh.sock'))
 STATUS_FILE = ROOT / 'ble_mesh_status.json'
 DB_PATH = os.environ.get('DB_PATH', str(ROOT / 'server/db/smart_plant.db'))
+DEVICE_UUID_PREFIX = b'SPM1'.hex()
 APP_PATH = '/smart_plant/mesh'
 ELEMENT_PATH = APP_PATH + '/element0'
 SERVICE = 'org.bluez.mesh'
@@ -96,13 +97,40 @@ class Gateway(dbus.service.Object):
     def persist(self):
         atomic_json(self.state_path, self.state)
 
+    def node_status(self):
+        nodes = []
+        for ident, record in self.state.get('nodes', {}).items():
+            nodes.append({
+                'uuid': ident,
+                'mesh_address': hex(record['address']),
+                'count': record['count'],
+                'provisioned': bool(record.get('provisioned')),
+                'appkey': bool(record.get('appkey')),
+                'bind': bool(record.get('bind')),
+                'publication': bool(record.get('publication')),
+                'configured': bool(record.get('configured')),
+            })
+        return nodes
+
+    def node_records_for_address(self, address):
+        return [record for record in self.state['nodes'].values() if record['address'] == address]
+
+    def set_node_flags(self, address, **flags):
+        records = self.node_records_for_address(address)
+        for record in records:
+            record.update(flags)
+        if records:
+            self.persist()
+        return records
+
     def report(self, state=None, **fields):
         if state:
             self.status['state'] = state
             self.status.pop('error', None)
         self.status.update(fields)
         self.status.update(timestamp=time.time(), ready=self.ready,
-                           devices=list(self.discovered.values()))
+                           devices=list(self.discovered.values()),
+                           nodes=self.node_status())
         atomic_json(STATUS_FILE, self.status, 0o644)
         print(json.dumps(self.status), flush=True)
 
@@ -168,6 +196,8 @@ class Gateway(dbus.service.Object):
         if len(raw) < 16:
             return
         ident = raw[:16].hex()
+        if not ident.startswith(DEVICE_UUID_PREFIX):
+            return
         self.discovered[ident] = {'uuid': ident, 'rssi': int(rssi), 'seen_at': time.time()}
         self.report()
 
@@ -185,7 +215,15 @@ class Gateway(dbus.service.Object):
     def AddNodeComplete(self, device_uuid, unicast, count):
         ident, address = bytes(device_uuid).hex(), int(unicast)
         self.provisioning = None
-        self.state['nodes'][ident] = {'address': address, 'count': int(count), 'configured': False}
+        self.state['nodes'][ident] = {
+            'address': address,
+            'count': int(count),
+            'provisioned': True,
+            'appkey': False,
+            'bind': False,
+            'publication': False,
+            'configured': False,
+        }
         self.persist()
         self.discovered.pop(ident, None)
         try:
@@ -295,6 +333,7 @@ class Gateway(dbus.service.Object):
                 return
             try:
                 pending['elements'] = vendor_elements(data, source, pending['count'])
+                pending['vendor_element_count'] = len(pending['elements'])
             except ValueError as error:
                 self.config_failed(error)
                 return
@@ -305,6 +344,17 @@ class Gateway(dbus.service.Object):
             if code != 0:
                 self.config_failed(f'{stage} rejected with Mesh status 0x{code:02x}')
                 return
+            if source != PI_ADDRESS:
+                if stage == 'appkey':
+                    self.set_node_flags(source, appkey=True)
+                elif stage == 'bind':
+                    pending['bind_count'] = pending.get('bind_count', 0) + 1
+                    if pending['bind_count'] >= pending.get('vendor_element_count', 1):
+                        self.set_node_flags(source, bind=True)
+                elif stage == 'publication':
+                    pending['publication_count'] = pending.get('publication_count', 0) + 1
+                    if pending['publication_count'] >= pending.get('vendor_element_count', 1):
+                        self.set_node_flags(source, publication=True)
         self.cancel_timer()
         if stage == 'composition':
             pending['stage'] = 'appkey'
@@ -321,7 +371,13 @@ class Gateway(dbus.service.Object):
                 self.ready = True
                 self.report('attached')
             else:
-                records = [record for record in self.state['nodes'].values() if record['address'] == source]
+                records = self.node_records_for_address(source)
+                required = ('provisioned', 'appkey', 'bind', 'publication')
+                complete = bool(records) and all(all(record.get(flag) for flag in required)
+                                                 for record in records)
+                if not complete:
+                    self.config_failed('Node is missing required mesh setup flags')
+                    return
                 try:
                     with database() as conn:
                         conn.execute('UPDATE ble_nodes SET status=? WHERE mesh_address=?', ('configured', hex(source)))
@@ -334,7 +390,8 @@ class Gateway(dbus.service.Object):
                     self.config_failed(f'Cannot save configured node: {error}')
                     return
                 self.pending = None
-                self.report('node_configured', address=hex(source))
+                self.report('node_configured', address=hex(source),
+                            provisioned=True, appkey=True, bind=True, publication=True)
             return
         # New object prevents late D-Bus errors for a previous step affecting this step.
         self.pending = dict(pending, attempt=0)
@@ -357,6 +414,8 @@ class Gateway(dbus.service.Object):
             self.scan_timer = GLib.timeout_add_seconds(31, self.scan_complete)
         elif action == 'provision':
             ident = uuid.UUID(request['uuid']).hex
+            if not ident.startswith(DEVICE_UUID_PREFIX):
+                raise ValueError('ESP32 UUID must start with SPM1')
             if ident in self.state['nodes']:
                 raise ValueError('Node already provisioned; use configure to retry configuration')
             if ident not in self.discovered or time.time() - self.discovered[ident]['seen_at'] > 120:
@@ -373,7 +432,7 @@ class Gateway(dbus.service.Object):
             if not record:
                 raise ValueError('Unknown provisioned UUID')
             self.register(ident, record['address'])
-            record['configured'] = False
+            record.update(provisioned=True, appkey=False, bind=False, publication=False, configured=False)
             self.persist()
             self.configure(record['address'], record['count'])
         else:
