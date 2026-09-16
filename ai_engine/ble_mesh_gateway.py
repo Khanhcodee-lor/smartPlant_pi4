@@ -74,6 +74,7 @@ class Gateway(dbus.service.Object):
         self.pending = None
         self.provisioning = None
         self.timer = None
+        self.scan_timer = None
         self.discovered = {}
         self.status = {'state': 'starting'}
         self.state_path = STATE_DIR / 'network.json'
@@ -257,6 +258,24 @@ class Gateway(dbus.service.Object):
             GLib.source_remove(self.timer)
             self.timer = None
 
+    def cancel_scan_timer(self):
+        if self.scan_timer is not None:
+            GLib.source_remove(self.scan_timer)
+            self.scan_timer = None
+
+    def scan_complete(self):
+        self.scan_timer = None
+        if self.status.get('state') == 'scanning':
+            self.report('attached')
+        return False
+
+    def cancel_scan(self):
+        self.cancel_scan_timer()
+        try:
+            self.manager.UnprovisionedScanCancel()
+        except dbus.DBusException as error:
+            print(f'Ignoring scan cancel error before provisioning: {error}', flush=True)
+
     def config_failed(self, error):
         self.cancel_timer()
         address = self.pending['address'] if self.pending else None
@@ -330,15 +349,18 @@ class Gateway(dbus.service.Object):
             raise ValueError('Gateway is busy provisioning/configuring a node')
         if action == 'scan':
             self.discovered.clear()
+            self.cancel_scan_timer()
             self.manager.UnprovisionedScan(dbus.Dictionary({'Seconds': dbus.UInt16(30)}, signature='sv'),
                                           reply_handler=lambda: self.report('scanning'),
                                           error_handler=lambda e: self.report('scan_failed', error=str(e)))
+            self.scan_timer = GLib.timeout_add_seconds(31, self.scan_complete)
         elif action == 'provision':
             ident = uuid.UUID(request['uuid']).hex
             if ident in self.state['nodes']:
                 raise ValueError('Node already provisioned; use configure to retry configuration')
             if ident not in self.discovered or time.time() - self.discovered[ident]['seen_at'] > 120:
                 raise ValueError('Scan again before provisioning this UUID')
+            self.cancel_scan()
             self.provisioning = ident
             self.report('provisioning', uuid=ident)
             self.manager.AddNode(dbus.ByteArray(bytes.fromhex(ident)), dbus.Dictionary({}, signature='sv'),
