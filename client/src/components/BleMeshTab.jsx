@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bluetooth, RefreshCw, Radio, Cpu, MapPin, Trash2, CheckCircle2, AlertCircle, Zap, Circle } from 'lucide-react';
+import { Bluetooth, RefreshCw, Radio, Cpu, Trash2, CheckCircle2, AlertCircle, Zap, Circle, Search, PlusCircle, Settings2 } from 'lucide-react';
 import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, removeBleNode, fetchZones } from '../api';
 
 export default function BleMeshTab() {
@@ -7,8 +7,18 @@ export default function BleMeshTab() {
   const [nodes, setNodes] = useState([]);
   const [zones, setZones] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [actionPending, setActionPending] = useState('');
+  const [uuidInput, setUuidInput] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  const discoveredDevices = status.devices || [];
+  const normalizedUuid = normalizeUuid(uuidInput);
+  const selectedDevice = discoveredDevices.find((device) => normalizeUuid(device.uuid) === normalizedUuid);
+  const existingNode = nodes.find((node) => normalizeUuid(node.uuid) === normalizedUuid);
+  const uuidIsValid = /^[0-9a-f]{32}$/.test(normalizedUuid);
+  const gatewayBusy = ['provisioning', 'configuring'].includes(status.state);
+  const canSubmitJoin = status.ready && uuidIsValid && !actionPending && !gatewayBusy;
 
   const loadData = async () => {
     setLoading(true);
@@ -30,24 +40,68 @@ export default function BleMeshTab() {
     }
   };
 
+  function normalizeUuid(value = '') {
+    return value.trim().replace(/[\s:-]/g, '').toLowerCase();
+  }
+
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 10000); // Refresh every 10s
     return () => clearInterval(interval);
   }, []);
 
-
-
-  const handleMeshCommand = async (command) => {
+  const handleMeshCommand = async (command, successText, actionKey = 'command') => {
     setError('');
     setSuccessMsg('');
+    setActionPending(actionKey);
     try {
       await command();
       await loadData();
-      setSuccessMsg('Đã nhận yêu cầu. Xem trạng thái gateway để biết kết quả.');
+      setSuccessMsg(successText || 'Đã nhận yêu cầu. Xem trạng thái gateway để biết kết quả.');
     } catch (err) {
       setError(err.message);
+    } finally {
+      setActionPending('');
     }
+  };
+
+  const handleScan = () => {
+    handleMeshCommand(
+      scanBleDevices,
+      'Đã bắt đầu quét ESP32 chưa provision.',
+      'scan'
+    );
+  };
+
+  const handleJoinSubmit = (event) => {
+    event.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    if (!uuidIsValid) {
+      setError('UUID phải gồm 32 ký tự hex.');
+      return;
+    }
+
+    if (!status.ready) {
+      setError('Gateway BLE Mesh trên Pi chưa sẵn sàng.');
+      return;
+    }
+
+    if (!existingNode && !selectedDevice) {
+      setError('UUID chưa có trong kết quả quét. Nhấn Quét ESP32 trước khi join.');
+      return;
+    }
+
+    const command = existingNode
+      ? () => configureBleDevice(normalizedUuid)
+      : () => provisionBleDevice(normalizedUuid);
+
+    handleMeshCommand(
+      command,
+      existingNode ? 'Đã gửi yêu cầu cấu hình lại node.' : 'Đã gửi yêu cầu cho ESP32 join vào BLE Mesh.',
+      existingNode ? 'configure' : 'provision'
+    );
   };
 
   const handleAssign = async (nodeId, zoneId) => {
@@ -71,23 +125,6 @@ export default function BleMeshTab() {
     }
   };
 
-  const getStateColor = (state) => {
-    const colors = {
-      'scanning': 'cyan',
-      'node_configured': 'emerald',
-      'configuration_failed': 'red',
-      'attached': 'emerald',
-      'joined': 'emerald',
-      'starting': 'amber',
-      'device_found': 'cyan',
-      'node_provisioned': 'emerald',
-      'not_started': 'slate',
-      'error': 'red',
-      'stopped': 'red',
-    };
-    return colors[state] || 'slate';
-  };
-
   const getStateLabel = (state) => {
     const labels = {
       'scanning': 'Đang quét thiết bị',
@@ -109,19 +146,87 @@ export default function BleMeshTab() {
     return labels[state] || state;
   };
 
+  const getStateTone = (state) => {
+    const tones = {
+      scanning: {
+        card: 'bg-cyan-50/50 border-cyan-100',
+        dot: 'bg-cyan-500 animate-pulse',
+      },
+      provisioning: {
+        card: 'bg-blue-50/50 border-blue-100',
+        dot: 'bg-blue-500 animate-pulse',
+      },
+      configuring: {
+        card: 'bg-amber-50/50 border-amber-100',
+        dot: 'bg-amber-500 animate-pulse',
+      },
+      node_configured: {
+        card: 'bg-emerald-50/50 border-emerald-100',
+        dot: 'bg-emerald-500 animate-pulse',
+      },
+      configuration_failed: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
+      },
+      provision_failed: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
+      },
+      scan_failed: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
+      },
+      attached: {
+        card: 'bg-emerald-50/50 border-emerald-100',
+        dot: 'bg-emerald-500 animate-pulse',
+      },
+      joined: {
+        card: 'bg-emerald-50/50 border-emerald-100',
+        dot: 'bg-emerald-500 animate-pulse',
+      },
+      starting: {
+        card: 'bg-amber-50/50 border-amber-100',
+        dot: 'bg-amber-500 animate-pulse',
+      },
+      device_found: {
+        card: 'bg-cyan-50/50 border-cyan-100',
+        dot: 'bg-cyan-500 animate-pulse',
+      },
+      node_provisioned: {
+        card: 'bg-emerald-50/50 border-emerald-100',
+        dot: 'bg-emerald-500 animate-pulse',
+      },
+      not_started: {
+        card: 'bg-slate-50/50 border-slate-100',
+        dot: 'bg-slate-400',
+      },
+      error: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
+      },
+      stopped: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
+      },
+    };
+    return tones[state] || { card: 'bg-slate-50/50 border-slate-100', dot: 'bg-slate-400' };
+  };
+
+  const formatSeenAt = (seenAt) => {
+    if (!seenAt) return '---';
+    return new Date(seenAt * 1000).toLocaleTimeString('vi-VN');
+  };
+
+  const stateTone = getStateTone(status.state);
+
   return (
     <div className="space-y-6 animate-fade-in-up">
       <div className="flex items-center justify-between px-2">
         <div>
           <h2 className="text-2xl font-display font-bold text-slate-900 tracking-tight">BLE Mesh Network</h2>
-          <p className="text-sm text-slate-500 mt-1">Quản lý mạng lưới cảm biến ESP32 không dây</p>
+          <p className="text-sm text-slate-500 mt-1">Pi hub quản lý các node cảm biến ESP32</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => handleMeshCommand(scanBleDevices)} disabled={!status.ready}
-            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm disabled:opacity-50">
-            Quét ESP32
-          </button>
-
           <button
             onClick={loadData}
             disabled={loading}
@@ -131,6 +236,120 @@ export default function BleMeshTab() {
             Làm mới
           </button>
         </div>
+      </div>
+
+      <div className="glass-panel p-6">
+        <form onSubmit={handleJoinSubmit} className="space-y-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <PlusCircle className="w-5 h-5 text-blue-500" />
+                Join ESP32 vào BLE Mesh
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">Gateway chỉ nhận ESP32 unprovisioned vừa được quét.</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleScan}
+              disabled={!status.ready || !!actionPending || gatewayBusy}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Search className={`w-4 h-4 ${actionPending === 'scan' ? 'animate-spin' : ''}`} />
+              Quét ESP32
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 xl:flex xl:items-end">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="ble-uuid" className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                Device UUID
+              </label>
+              <input
+                id="ble-uuid"
+                value={uuidInput}
+                onChange={(event) => setUuidInput(event.target.value)}
+                placeholder="32 ký tự hex của ESP32"
+                autoComplete="off"
+                spellCheck="false"
+                maxLength={47}
+                className="w-full rounded-xl border border-slate-200 bg-white/80 px-4 py-3 font-mono text-sm text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!canSubmitJoin}
+              className="inline-flex min-h-11 items-center justify-center gap-2 self-end rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 transition-colors hover:bg-blue-700 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed"
+            >
+              {existingNode ? <Settings2 className="w-4 h-4" /> : <PlusCircle className="w-4 h-4" />}
+              {existingNode ? 'Cấu hình lại node' : 'Join vào Mesh'}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-medium ${status.ready ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+              <Circle className={`w-2 h-2 fill-current ${status.ready ? 'animate-pulse' : ''}`} />
+              {status.ready ? 'Gateway sẵn sàng' : 'Gateway chưa sẵn sàng'}
+            </span>
+            {normalizedUuid && (
+              <span className={`rounded-full px-3 py-1 font-medium ${uuidIsValid ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-600'}`}>
+                {uuidIsValid ? normalizedUuid : 'UUID chưa hợp lệ'}
+              </span>
+            )}
+            {uuidIsValid && existingNode && (
+              <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+                Đã có trong mạng {existingNode.mesh_address || ''}
+              </span>
+            )}
+            {uuidIsValid && !existingNode && selectedDevice && (
+              <span className="rounded-full bg-cyan-50 px-3 py-1 font-medium text-cyan-700">
+                Đã quét: {selectedDevice.rssi} dBm
+              </span>
+            )}
+            {gatewayBusy && (
+              <span className="rounded-full bg-amber-50 px-3 py-1 font-medium text-amber-700">
+                Gateway đang bận
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-700">ESP32 vừa quét ({discoveredDevices.length})</p>
+              {status.state === 'scanning' && (
+                <span className="text-xs font-medium text-cyan-700">Đang quét...</span>
+              )}
+            </div>
+            {discoveredDevices.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 px-4 py-5 text-center text-sm text-slate-500">
+                Chưa thấy ESP32 unprovisioned.
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                {discoveredDevices.map((device) => {
+                  const deviceSelected = normalizeUuid(device.uuid) === normalizedUuid;
+                  return (
+                    <button
+                      key={device.uuid}
+                      type="button"
+                      onClick={() => setUuidInput(device.uuid)}
+                      className={`flex flex-col gap-2 rounded-lg border px-3 py-3 text-left transition-colors sm:flex-row sm:items-center sm:justify-between ${
+                        deviceSelected
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-slate-200 bg-white/80 text-slate-700 hover:border-blue-200 hover:bg-white'
+                      }`}
+                    >
+                      <span className="font-mono text-xs break-all">{device.uuid}</span>
+                      <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                        <span>{device.rssi} dBm</span>
+                        <span>{formatSeenAt(device.seen_at)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </form>
       </div>
 
       {error && (
@@ -156,8 +375,8 @@ export default function BleMeshTab() {
             Trạng thái Gateway
           </h3>
           <div className="space-y-4">
-            <div className={`flex items-center gap-3 p-4 rounded-xl border bg-${getStateColor(status.state)}-50/50 border-${getStateColor(status.state)}-100`}>
-              <div className={`w-3 h-3 rounded-full ${status.state === 'attached' || status.state === 'joined' ? 'bg-emerald-500 animate-pulse' : status.state === 'starting' ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'}`} />
+            <div className={`flex items-center gap-3 p-4 rounded-xl border ${stateTone.card}`}>
+              <div className={`w-3 h-3 rounded-full ${stateTone.dot}`} />
               <div>
                 <p className="font-semibold text-slate-900 text-sm">{getStateLabel(status.state)}</p>
                 <p className="text-xs text-slate-500">Chip: Bluetooth 5.0 (Pi4 Internal)</p>
@@ -188,19 +407,6 @@ export default function BleMeshTab() {
           </div>
         </div>
       </div>
-
-      {(status.devices || []).length > 0 && (
-        <div className="glass-panel p-6 space-y-3">
-          <h3 className="font-semibold">ESP32 chưa gia nhập mạng</h3>
-          {status.devices.map(device => (
-            <div key={device.uuid} className="flex items-center justify-between gap-3">
-              <span className="font-mono text-xs">{device.uuid} · {device.rssi} dBm</span>
-              <button onClick={() => handleMeshCommand(() => provisionBleDevice(device.uuid))}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">Thêm vào mạng</button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Nodes Table */}
       <div className="glass-panel p-6">
