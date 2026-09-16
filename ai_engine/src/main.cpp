@@ -213,10 +213,15 @@ struct Config {
     int pest_interval   = 30;  // giây
     int num_zones       = 4;
     int port            = 3000;
+    bool simulate_sensors = false;
 };
 
 Config parse_args(int argc, char* argv[]) {
     Config cfg;
+    const char* simulate_env = getenv("SIMULATE_SENSORS");
+    if (simulate_env && std::string(simulate_env) == "1") {
+        cfg.simulate_sensors = true;
+    }
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--server-url" && i + 1 < argc) {
@@ -230,6 +235,8 @@ Config parse_args(int argc, char* argv[]) {
         } else if (arg == "--port" && i + 1 < argc) {
             cfg.port = std::stoi(argv[++i]);
             cfg.server_url = "http://localhost:" + std::to_string(cfg.port);
+        } else if (arg == "--simulate-sensors") {
+            cfg.simulate_sensors = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
@@ -238,6 +245,7 @@ Config parse_args(int argc, char* argv[]) {
                       << "  --sensor-interval N   Sensor read interval in seconds (default: 5)\n"
                       << "  --pest-interval N     Pest detection interval in seconds (default: 30)\n"
                       << "  --zones N             Number of zones (default: 4)\n"
+                      << "  --simulate-sensors    Generate demo sensor data (or SIMULATE_SENSORS=1)\n"
                       << "  -h, --help            Show this help\n";
             std::exit(0);
         }
@@ -278,6 +286,7 @@ int main(int argc, char* argv[]) {
               << "║  Sensor:  mỗi " << std::left << std::setw(29) << (std::to_string(cfg.sensor_interval) + " giây") << "║\n"
               << "║  Pest:    mỗi " << std::left << std::setw(29) << (std::to_string(cfg.pest_interval) + " giây") << "║\n"
               << "║  Zones:   " << std::left << std::setw(34) << cfg.num_zones << "║\n"
+              << "║  SimData: " << std::left << std::setw(34) << (cfg.simulate_sensors ? "ON" : "OFF") << "║\n"
               << "╚══════════════════════════════════════════════╝\n"
               << std::endl;
 
@@ -319,7 +328,7 @@ int main(int argc, char* argv[]) {
     SensorSimulator sensor;
     PestDetector pest;
 
-    std::cout << "\n📡 Bắt đầu gửi dữ liệu... (Ctrl+C để dừng)\n" << std::endl;
+    std::cout << "\n📡 Bắt đầu chạy hệ thống... (Ctrl+C để dừng)\n" << std::endl;
 
     int sensor_counter = 0;
     int pest_counter = 0;
@@ -345,7 +354,7 @@ int main(int argc, char* argv[]) {
         }
 
         // === GỬI SENSOR DATA ===
-        if (tick % cfg.sensor_interval == 0) {
+        if (cfg.simulate_sensors && tick % cfg.sensor_interval == 0) {
             int zone_id = (sensor_counter % cfg.num_zones) + 1;
             auto data = sensor.read_sensors(zone_id);
 
