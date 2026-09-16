@@ -39,6 +39,7 @@ PROVISIONER = SERVICE + '.Provisioner1'
 AGENT = SERVICE + '.ProvisionAgent1'
 ELEMENT = SERVICE + '.Element1'
 OM = 'org.freedesktop.DBus.ObjectManager'
+PROPERTIES = 'org.freedesktop.DBus.Properties'
 
 
 def atomic_json(path, value, mode=0o600):
@@ -420,6 +421,23 @@ class Element(dbus.service.Object):
 class ProvisionAgent(dbus.service.Object):
     def __init__(self, bus):
         super().__init__(bus, APP_PATH + '/agent')
+
+    @dbus.service.method(PROPERTIES, in_signature='s', out_signature='a{sv}')
+    def GetAll(self, interface):
+        if interface != AGENT:
+            return dbus.Dictionary({}, signature='sv')
+        return dbus.Dictionary({
+            'Capabilities': dbus.Array([], signature='s'),
+        }, signature='sv')
+
+    @dbus.service.method(PROPERTIES, in_signature='ss', out_signature='v')
+    def Get(self, interface, name):
+        if interface == AGENT and name == 'Capabilities':
+            return dbus.Array([], signature='s')
+        raise dbus.exceptions.DBusException(
+            f'No such property {name}',
+            name='org.freedesktop.DBus.Error.InvalidArgs',
+        )
 
     @dbus.service.method(AGENT, in_signature='', out_signature='')
     def Cancel(self):
