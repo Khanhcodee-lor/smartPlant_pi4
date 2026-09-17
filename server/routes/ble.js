@@ -5,7 +5,7 @@ const { getDb } = require('../db/database');
 const net = require('net');
 
 
-// GET /api/ble/status - Get BLE Mesh gateway status
+// GET /api/ble/status - Get the USB-connected ESP32 Mesh gateway status
 router.get('/status', async (req, res) => {
   try {
     const result = await gatewayCommand({ action: 'status' });
@@ -59,7 +59,7 @@ router.post('/nodes/:id/assign-zone', (req, res) => {
   }
 });
 
-// Commands must come from the process that owns the BlueZ attachment.
+// The Python process owns the USB serial connection to the ESP32 gateway.
 const SOCKET_PATH = process.env.MESH_SOCKET_PATH || path.join(__dirname, '..', '..', 'ble_mesh.sock');
 function gatewayCommand(command) {
   return new Promise((resolve, reject) => {
@@ -73,7 +73,7 @@ function gatewayCommand(command) {
       if (error) reject(error); else resolve(result);
     };
     socket.setTimeout(5000, () => finish(new Error('Gateway timed out')));
-    socket.on('error', () => finish(new Error('BLE gateway unavailable; check Python process and socket permissions')));
+    socket.on('error', () => finish(new Error('BLE gateway unavailable; check the ESP32 USB connection and Python process')));
     socket.on('connect', () => socket.write(JSON.stringify(command) + '\n'));
     socket.on('data', (data) => {
       buffer += data.toString();

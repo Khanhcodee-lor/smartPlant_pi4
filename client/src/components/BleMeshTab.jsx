@@ -84,7 +84,7 @@ export default function BleMeshTab() {
     }
 
     if (!status.ready) {
-      setError('Gateway BLE Mesh trên Pi chưa sẵn sàng.');
+      setError('ESP32 Mesh Gateway nối USB chưa sẵn sàng.');
       return;
     }
 
@@ -134,7 +134,9 @@ export default function BleMeshTab() {
       'configuration_failed': 'Cấu hình thất bại',
       'provision_failed': 'Cấp mạng thất bại',
       'scan_failed': 'Quét thất bại',
-      'attached': 'Đã kết nối mạng Mesh',
+      'attached': 'ESP32 Gateway đã sẵn sàng',
+      'connecting': 'Đang kết nối ESP32 qua USB',
+      'disconnected': 'Chưa thấy ESP32 Gateway',
       'joined': 'Đã tham gia mạng',
       'starting': 'Đang khởi động...',
       'device_found': 'Phát hiện thiết bị mới',
@@ -179,6 +181,14 @@ export default function BleMeshTab() {
       attached: {
         card: 'bg-emerald-50/50 border-emerald-100',
         dot: 'bg-emerald-500 animate-pulse',
+      },
+      connecting: {
+        card: 'bg-amber-50/50 border-amber-100',
+        dot: 'bg-amber-500 animate-pulse',
+      },
+      disconnected: {
+        card: 'bg-red-50/50 border-red-100',
+        dot: 'bg-red-500',
       },
       joined: {
         card: 'bg-emerald-50/50 border-emerald-100',
@@ -246,7 +256,7 @@ export default function BleMeshTab() {
                 <PlusCircle className="w-5 h-5 text-blue-500" />
                 Join ESP32 vào BLE Mesh
               </h3>
-              <p className="text-sm text-slate-500 mt-1">Gateway chỉ nhận ESP32 unprovisioned vừa được quét.</p>
+              <p className="text-sm text-slate-500 mt-1">ESP32 Gateway quét và đưa node cảm biến vào mạng.</p>
             </div>
             <button
               type="button"
@@ -379,12 +389,14 @@ export default function BleMeshTab() {
               <div className={`w-3 h-3 rounded-full ${stateTone.dot}`} />
               <div>
                 <p className="font-semibold text-slate-900 text-sm">{getStateLabel(status.state)}</p>
-                <p className="text-xs text-slate-500">Chip: Bluetooth 5.0 (Pi4 Internal)</p>
+                <p className="text-xs text-slate-500">
+                  Kết nối: {status.serial_port || 'USB serial chưa kết nối'}
+                </p>
               </div>
             </div>
             {status.error && <p className="text-sm text-red-600">{status.error}</p>}
-            {status.bluetooth_mac && (
-              <p className="text-xs text-slate-500 font-mono px-1">MAC: {status.bluetooth_mac}</p>
+            {status.firmware && (
+              <p className="text-xs text-slate-500 font-mono px-1">Firmware: {status.firmware}</p>
             )}
           </div>
         </div>

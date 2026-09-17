@@ -217,9 +217,9 @@ echo -e "  -> Đẩy giao diện Web static (public/)..."
 rsync -avz --delete "${SERVER_DIR}/public/" "${PI_USER}@${PI_IP}:${PI_DIR}/server/public/"
 [ -f "${SERVER_DIR}/.env" ] && scp "${SERVER_DIR}/.env" "${PI_USER}@${PI_IP}:${PI_DIR}/server/"
 
-# Push BLE Mesh Gateway (Python script)
-echo -e "  -> Đẩy BLE Mesh Gateway script..."
-scp "${AI_ENGINE_DIR}/ble_mesh_gateway.py" "${AI_ENGINE_DIR}/ble_mesh_protocol.py" "${PI_USER}@${PI_IP}:${PI_DIR}/ai_engine/"
+# Push ESP32 USB Mesh bridge
+echo -e "  -> Đẩy ESP32 USB Mesh bridge..."
+scp "${AI_ENGINE_DIR}/ble_mesh_gateway.py" "${PI_USER}@${PI_IP}:${PI_DIR}/ai_engine/"
 
 # 7. Start Remote Application
 echo -e "${GREEN}🔄 [5/5] Khởi động ứng dụng trên Raspberry Pi...${NC}"
