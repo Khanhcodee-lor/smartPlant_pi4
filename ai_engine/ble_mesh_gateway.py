@@ -204,6 +204,8 @@ class Gateway(dbus.service.Object):
     @dbus.service.method(PROVISIONER, in_signature='y', out_signature='qq')
     def RequestProvData(self, count):
         address = self.state['next_address']
+        self.report('provision_data_requested', requested_elements=int(count),
+                    allocated_address=hex(address))
         if not self.provisioning or not 1 <= int(count) <= 255 or address + count > 0x8000:
             raise dbus.exceptions.DBusException('Cannot allocate address range', name=SERVICE + '.Error.Abort')
         # Reserve before returning. Failed provisioning consumes addresses intentionally.
