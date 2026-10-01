@@ -21,7 +21,7 @@ import {
   fetchPestStats,
 } from './api';
 
-const REFRESH_INTERVAL = 30_000; // 30 seconds
+const REFRESH_INTERVAL = 5_000; // Refresh live data every 5 seconds
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -64,9 +64,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadAllData();
     const interval = setInterval(loadAllData, REFRESH_INTERVAL);
+    return () => clearInterval(interval);
   }, [loadAllData]);
+
+  useEffect(() => { if (activeTab === 'dashboard') loadAllData(); }, [activeTab, loadAllData]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans selection:bg-emerald-500/30 overflow-hidden relative">
@@ -158,6 +160,14 @@ export default function App() {
                         {zones.length} khu vực
                       </span>
                     </div>
+                    {zones.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-emerald-200 bg-white p-8 text-center">
+                        <Sprout className="mx-auto mb-3 h-9 w-9 text-emerald-500" />
+                        <h3 className="font-semibold text-slate-800">Chưa có khu vực nào</h3>
+                        <p className="mt-2 text-sm text-slate-500">Khu vực sẽ xuất hiện khi ESP32 Join Mesh và cấu hình thành công.</p>
+                        <button onClick={() => setActiveTab('ble')} className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Thêm ESP32 vào Mesh</button>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                       {zones.map((zone, i) => (
                         <ZoneCard key={zone.id} zone={zone} delay={600 + (i * 100)} />

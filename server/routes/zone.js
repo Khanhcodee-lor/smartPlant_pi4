@@ -20,7 +20,7 @@ router.get('/', (req, res) => {
         bn.last_seen as node_last_seen,
         bn.uuid as node_uuid
       FROM zones z
-      LEFT JOIN ble_nodes bn ON bn.zone_id = z.id
+      INNER JOIN ble_nodes bn ON bn.zone_id = z.id AND bn.status IN ('configured', 'active')
       ORDER BY z.name
     `).all();
 
@@ -70,30 +70,7 @@ router.get('/:id', (req, res) => {
 
 // POST /api/zones — Tạo khu vực mới
 router.post('/', (req, res) => {
-  try {
-    const db = getDb();
-    const { name, description } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
-    }
-
-    const stmt = db.prepare(`
-      INSERT INTO zones (name, description) VALUES (?, ?)
-    `);
-
-    const result = stmt.run(name, description || null);
-
-    res.status(201).json({
-      message: 'Zone created',
-      id: result.lastInsertRowid
-    });
-  } catch (err) {
-    if (err.message.includes('UNIQUE')) {
-      return res.status(409).json({ error: 'Zone name already exists' });
-    }
-    res.status(500).json({ error: err.message });
-  }
+  res.status(409).json({ error: 'Khu vực được tạo tự động sau khi node Join Mesh thành công.' });
 });
 
 // PUT /api/zones/:id — Cập nhật khu vực

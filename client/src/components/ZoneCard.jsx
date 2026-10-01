@@ -28,7 +28,9 @@ export default function ZoneCard({ zone, delay = 0 }) {
     },
   };
 
-  const status = statusConfig[zone.status] || statusConfig.inactive;
+  const lastSeen = zone.node_last_seen ? Date.parse(zone.node_last_seen.replace(' ', 'T') + (zone.node_last_seen.endsWith('Z') ? '' : 'Z')) : 0;
+  const online = zone.node_status === 'active' && Date.now() - lastSeen < 30000;
+  const status = online ? statusConfig.active : statusConfig.inactive;
 
   const metrics = [
     {
@@ -64,7 +66,7 @@ export default function ZoneCard({ zone, delay = 0 }) {
   ];
 
   const hasNode = zone.node_name || zone.node_mesh_address;
-  const nodeActive = zone.node_status === 'active' || zone.node_status === 'provisioned';
+  const nodeActive = online;
 
   return (
     <div

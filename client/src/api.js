@@ -233,11 +233,12 @@ export async function assignNodeToZone(nodeId, zoneId) {
 export async function removeBleNode(nodeId) {
   try {
     const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Delete Error');
-    return await res.json();
+    const result = await res.json();
+    if (!res.ok || !result.success) throw new Error(result.error || 'Không thể xóa node');
+    return result;
   } catch (err) {
     console.error('[API] removeBleNode:', err.message);
-    return null;
+    throw err;
   }
 }
 

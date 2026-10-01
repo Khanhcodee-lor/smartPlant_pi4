@@ -119,25 +119,14 @@ router.get('/zones', (req, res) => {
 });
 
 // DELETE /api/ble/nodes/:id - Remove a BLE node
-router.delete('/nodes/:id', (req, res) => {
-  const { id } = req.params;
+router.delete('/nodes/:id', async (req, res) => {
   try {
-    const db = getDb();
-    const node = db.prepare('SELECT * FROM ble_nodes WHERE id = ?').get(id);
-    if (!node) {
-      return res.status(404).json({ error: 'Node not found' });
-    }
-
-    // Clear mesh_address from zone if assigned
-    if (node.zone_id) {
-      db.prepare('UPDATE zones SET mesh_address = NULL WHERE id = ?').run(node.zone_id);
-    }
-
-    db.prepare('DELETE FROM ble_nodes WHERE id = ?').run(id);
-    res.json({ success: true, message: `Node ${id} removed` });
+    const node = getDb().prepare('SELECT * FROM ble_nodes WHERE id = ?').get(req.params.id);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+    const result = await gatewayCommand({ action: 'remove', uuid: node.uuid });
+    res.status(result.success ? 202 : 409).json(result);
   } catch (error) {
-    console.error('Error removing node:', error);
-    res.status(500).json({ error: 'Failed to remove node' });
+    res.status(503).json({ success: false, error: error.message });
   }
 });
 

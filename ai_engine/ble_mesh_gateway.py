@@ -23,6 +23,8 @@ BAUD_RATE = int(os.environ.get('MESH_SERIAL_BAUD', '115200'))
 DEVICE_UUID_PREFIX = b'SPM1'.hex()
 REQUIRED_FLAGS = ('provisioned', 'appkey', 'bind', 'publication')
 MAX_LINE = 4096
+HANDSHAKE_TIMEOUT = 20
+STATUS_INTERVAL = 2
 
 
 def database():
@@ -53,7 +55,10 @@ def serial_candidates():
         return [SERIAL_PORT]
     paths = glob.glob('/dev/serial/by-id/*')
     paths += glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')
-    return list(dict.fromkeys(paths))
+    unique = {}
+    for path in paths:
+        unique.setdefault(os.path.realpath(path), path)
+    return list(unique.values())
 
 
 def configure_serial(fd):
@@ -74,11 +79,17 @@ def configure_serial(fd):
 
 class Gateway:
     def __init__(self):
+        with database() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS mesh_removals (uuid TEXT PRIMARY KEY, state TEXT NOT NULL)")
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.fd = None
         self.port = None
         self.last_seen = 0
+        self.connected_at = 0
+        self.last_status_request = 0
+        self.candidate_index = 0
+        self.synchronized = False
         self.discovered = {}
         self.nodes = {}
         self.status = {
@@ -107,18 +118,39 @@ class Gateway:
         print(json.dumps(message, ensure_ascii=True), flush=True)
 
     def connect(self):
-        for port in serial_candidates():
+        ports = serial_candidates()
+        if not ports:
+            self.report('disconnected', ready=False,
+                        error='Không thấy cổng USB serial trên máy chạy bridge. Kiểm tra cáp data và cổng USB của Pi.')
+            return False
+        start = self.candidate_index % len(ports)
+        for offset in range(len(ports)):
+            index = (start + offset) % len(ports)
+            port = ports[index]
+            fd = None
             try:
                 fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 configure_serial(fd)
                 with self.lock:
                     self.fd = fd
                     self.port = os.path.realpath(port)
                     self.status.update(state='connecting', ready=False)
+                    self.status.pop('error', None)
+                    self.connected_at = time.monotonic()
+                    self.last_status_request = self.connected_at
+                    self.synchronized = False
+                    self.candidate_index = index + 1
                 self.write({'action': 'status'})
                 self.report()
                 return True
             except (OSError, ValueError) as error:
+                if fd is not None:
+                    with self.lock:
+                        if self.fd == fd:
+                            self.fd = None
+                            self.port = None
+                    os.close(fd)
                 self.report('disconnected', ready=False, error=f'{port}: {error}')
         return False
 
@@ -126,6 +158,8 @@ class Gateway:
         with self.lock:
             fd, self.fd = self.fd, None
             self.port = None
+            self.discovered.clear()
+            self.synchronized = False
             self.status.update(state='disconnected', ready=False)
             if error:
                 self.status['error'] = str(error)
@@ -141,9 +175,12 @@ class Gateway:
         with self.lock:
             if self.fd is None:
                 raise ValueError('ESP32 gateway is not connected by USB')
+            _, writable, _ = select.select([], [self.fd], [], 2.0)
+            if not writable:
+                raise OSError('UART TX buffer not writable')
             written = os.write(self.fd, data)
-        if written != len(data):
-            raise OSError('Incomplete serial write')
+            if written != len(data):
+                raise OSError('Incomplete serial write')
 
     def run(self):
         buffer = b''
@@ -158,6 +195,13 @@ class Gateway:
                     fd = self.fd
                 if fd is None:
                     continue
+                now = time.monotonic()
+                if not self.status.get('ready') and not self.synchronized:
+                    if now - self.connected_at >= HANDSHAKE_TIMEOUT:
+                        raise OSError('ESP32 không trả gateway ready qua USB; kiểm tra firmware gateway, baud 115200 và đóng Serial Monitor')
+                    if now - self.last_status_request >= STATUS_INTERVAL:
+                        self.write({'action': 'status'})
+                        self.last_status_request = now
                 readable, _, _ = select.select([fd], [], [], 1)
                 if not readable:
                     continue
@@ -172,6 +216,8 @@ class Gateway:
                 while b'\n' in buffer:
                     line, buffer = buffer.split(b'\n', 1)
                     self.handle_line(line.strip())
+            except BlockingIOError:
+                continue
             except OSError as error:
                 if self.stop_event.is_set():
                     break
@@ -181,6 +227,8 @@ class Gateway:
         if not line:
             return
         try:
+            if not (line.startswith(b'{') and line.endswith(b'}')):
+                return  # Ignore ROM boot text or fragmented lines
             event = json.loads(line.decode('utf-8'))
             if not isinstance(event, dict):
                 raise ValueError('Expected a JSON object')
@@ -198,29 +246,49 @@ class Gateway:
             self.report(event.get('state') or ('attached' if ready else 'starting'),
                         ready=ready, firmware=event.get('firmware'),
                         gateway_address=event.get('address', '0x0001'))
+            if ready and not self.synchronized and self.fd is not None:
+                self.synchronized = True
+                self.write({'action': 'status'})  # Replay persisted nodes after boot/reconnect.
+                if self.status.get('state') in ('attached', 'remove_failed'):
+                    with database() as conn:
+                        pending = conn.execute("SELECT uuid FROM mesh_removals WHERE state='pending' LIMIT 1").fetchone()
+                    if pending:
+                        self.command({'action': 'remove', 'uuid': pending['uuid']})
         elif kind == 'scan_result':
             ident = normalize_uuid(event.get('uuid'))
             device = {'uuid': ident, 'rssi': int(event.get('rssi', 0)), 'seen_at': time.time()}
             with self.lock:
                 self.discovered[ident] = device
-            self.report('scanning')
+            self.report(None if self.status.get('state') in ('provisioning', 'configuring', 'removing') else 'scanning')
         elif kind == 'state':
             state = str(event.get('state') or 'error')
             fields = {'ready': bool(event.get('ready', self.status.get('ready')))}
             if event.get('error'):
                 fields['error'] = str(event['error'])
+            if state == 'remove_failed':
+                with database() as conn:
+                    conn.execute("UPDATE mesh_removals SET state='failed' WHERE state='pending'")
             self.report(state, **fields)
+        elif kind == 'node_removed':
+            self.finish_removal(normalize_uuid(event.get('uuid')))
         elif kind == 'node':
             self.handle_node(event)
         elif kind == 'sensor':
             self.handle_sensor(event)
         elif kind == 'error':
-            self.report('error', error=str(event.get('message') or 'ESP32 gateway error'))
+            # A rejected command must not erase the operation still in progress.
+            self.report(error=str(event.get('message') or 'ESP32 gateway error'))
+            if self.fd is not None:
+                self.write({'action': 'status'})
 
     def handle_node(self, event):
         ident = normalize_uuid(event.get('uuid'))
+        with database() as conn:
+            removed = conn.execute("SELECT state FROM mesh_removals WHERE uuid=?", (ident,)).fetchone()
+        if removed and removed['state'] == 'confirmed':
+            return
         address = normalize_address(event.get('address'))
-        flags = {name: bool(event.get(name)) for name in REQUIRED_FLAGS}
+        flags = {name: event.get(name) is True for name in REQUIRED_FLAGS}
         configured = all(flags.values())
         node = {'uuid': ident, 'mesh_address': f'0x{address:04x}',
                 **flags, 'configured': configured}
@@ -228,31 +296,46 @@ class Gateway:
             self.nodes[ident] = node
             self.discovered.pop(ident, None)
         self.save_node(node)
-        self.report('node_configured' if configured else 'configuring', **node)
+        self.report(**node)  # Node snapshots must not overwrite the gateway's operation state.
 
     def save_node(self, node):
         with database() as conn:
-            row = conn.execute('SELECT id FROM ble_nodes WHERE uuid=?', (node['uuid'],)).fetchone()
+            row = conn.execute('SELECT id,zone_id,status,mesh_address FROM ble_nodes WHERE uuid=?', (node['uuid'],)).fetchone()
             status = 'configured' if node['configured'] else 'provisioned'
-            if row:
-                conn.execute('UPDATE ble_nodes SET mesh_address=?,status=? WHERE uuid=?',
-                             (node['mesh_address'], status, node['uuid']))
-                return
-            zone_name = f"Khu {node['mesh_address'][2:]}"
-            zone = conn.execute('SELECT id FROM zones WHERE name=?', (zone_name,)).fetchone()
-            if zone:
-                zone_id = zone['id']
-                conn.execute('UPDATE zones SET mesh_address=? WHERE id=?',
-                             (node['mesh_address'], zone_id))
-            else:
+            if row and row['status'] == 'active' and node['configured']:
+                status = 'active'
+            zone_id = row['zone_id'] if row else None
+            # A provisioning snapshot is not a successful Join.
+            if node['configured'] and zone_id is None:
                 zone_id = conn.execute(
                     'INSERT INTO zones(name,description,mesh_address) VALUES(?,?,?)',
-                    (zone_name, f"ESP32 {node['uuid']}", node['mesh_address'])
+                    (f"Khu {node['mesh_address'][2:]}", f"ESP32 {node['uuid']}", node['mesh_address'])
                 ).lastrowid
-            conn.execute(
-                'INSERT INTO ble_nodes(uuid,mesh_address,name,zone_id,status) VALUES(?,?,?,?,?)',
-                (node['uuid'], node['mesh_address'], f"Node-{node['mesh_address'][2:]}", zone_id, status)
-            )
+            if row:
+                conn.execute('UPDATE ble_nodes SET mesh_address=?,status=?,zone_id=? WHERE uuid=?',
+                             (node['mesh_address'], status, zone_id, node['uuid']))
+            else:
+                conn.execute('INSERT INTO ble_nodes(uuid,mesh_address,name,zone_id,status) VALUES(?,?,?,?,?)',
+                             (node['uuid'], node['mesh_address'], f"Node-{node['mesh_address'][2:]}", zone_id, status))
+            if zone_id is not None:
+                conn.execute('UPDATE zones SET mesh_address=? WHERE id=?', (node['mesh_address'], zone_id))
+
+    def finish_removal(self, ident):
+        with self.lock, database() as conn:
+            row = conn.execute('SELECT zone_id FROM ble_nodes WHERE uuid=?', (ident,)).fetchone()
+            conn.execute("INSERT OR REPLACE INTO mesh_removals VALUES (?, 'confirmed')", (ident,))
+            conn.execute('DELETE FROM ble_nodes WHERE uuid=?', (ident,))
+            if row and row['zone_id'] is not None:
+                zone_id = row['zone_id']
+                if not conn.execute('SELECT 1 FROM ble_nodes WHERE zone_id=?', (zone_id,)).fetchone():
+                    conn.execute('DELETE FROM sensor_data WHERE zone_id=?', (zone_id,))
+                    conn.execute('DELETE FROM pest_detections WHERE zone_id=?', (zone_id,))
+                    conn.execute('DELETE FROM zones WHERE id=?', (zone_id,))
+            self.nodes.pop(ident, None)
+            self.discovered.pop(ident, None)
+            for field in ('error', 'uuid', 'mesh_address', 'configured', 'sensor_address', 'last_sensor', *REQUIRED_FLAGS):
+                self.status.pop(field, None)
+            self.report('attached', removed_uuid=ident)
 
     def handle_sensor(self, event):
         address = normalize_address(event.get('address'))
@@ -286,20 +369,30 @@ class Gateway:
         action = request.get('action')
         if action == 'status':
             return {'success': True, 'data': self.snapshot()}
-        with self.lock:
-            ready = bool(self.fd is not None and self.status.get('ready'))
-        if not ready:
-            raise ValueError('ESP32 Mesh Gateway is not ready on USB')
         command = {'action': action}
-        if action == 'scan':
-            with self.lock:
-                self.discovered.clear()
-        elif action in ('provision', 'configure'):
+        if action in ('provision', 'configure', 'remove'):
             command['uuid'] = normalize_uuid(request.get('uuid'))
-        else:
+        elif action != 'scan':
             raise ValueError('Unknown action')
-        self.write(command)
-        return {'success': True, 'message': 'Command sent to ESP32 gateway'}
+        with self.lock:
+            if self.fd is None or not self.status.get('ready'):
+                raise ValueError('ESP32 Mesh Gateway is not ready on USB')
+            if self.status.get('state') in ('provisioning', 'configuring', 'removing'):
+                raise ValueError('Gateway đang thêm/cấu hình node. Chờ thao tác hiện tại hoàn tất.')
+            if action == 'remove':
+                if (self.status.get('firmware') or '1.0.0') < '1.1.0':
+                    raise ValueError('Cần firmware gateway 1.1.0 để xóa node khỏi mạng')
+                with database() as conn:
+                    conn.execute("INSERT OR REPLACE INTO mesh_removals VALUES (?, 'pending')", (command['uuid'],))
+            if action == 'provision':
+                with database() as conn:
+                    conn.execute('DELETE FROM mesh_removals WHERE uuid=?', (command['uuid'],))
+            self.write(command)
+            if action == 'scan':
+                self.discovered.clear()
+            self.report({'scan': 'scanning', 'provision': 'provisioning',
+                         'configure': 'configuring', 'remove': 'removing'}[action])
+        return {'success': True, 'message': 'Command sent; awaiting gateway result'}
 
     def stop(self):
         self.stop_event.set()

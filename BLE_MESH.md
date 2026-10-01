@@ -89,3 +89,40 @@ node --test server/test/ble.test.js
 /usr/bin/python3 -m unittest discover -s ai_engine -p 'test_ble_mesh.py' -v
 npm --prefix client run build
 ```
+
+## Không quét thấy node trên web
+
+Chạy trên **Raspberry Pi đang phục vụ web** (không phải laptop chỉnh code):
+
+```bash
+ls -l /dev/serial/by-id/ /dev/ttyUSB* /dev/ttyACM*
+/usr/bin/python3 ai_engine/ble_mesh_gateway.py status
+```
+
+- `disconnected`: Pi chưa mở được USB gateway. Kiểm tra cáp data, nhóm `dialout`,
+  và `MESH_SERIAL_PORT` có đang cố định cổng cũ hay không.
+- `connecting`: cổng mở được nhưng chưa nhận JSON `gateway` với `ready:true`.
+  Đóng Serial Monitor và kiểm tra đã nạp firmware gateway. Bridge hỏi lại status
+  mỗi 2 giây trong 20 giây, sau đó thử kết nối lại/chuyển cổng nếu tự dò.
+- `attached, ready:true`: bật ESP32 **node cảm biến riêng**, chọn **Quét ESP32**,
+  bấm UUID tìm được rồi **Join vào Mesh**. ESP32 gateway nối USB không nằm trong
+  danh sách quét. Node đã provision không quảng bá unprovisioned nữa; dùng
+  **Cấu hình lại** nếu node đã xuất hiện trong danh sách.
+
+Bridge bỏ qua chữ boot ROM, đồng bộ node đã lưu khi gateway sẵn sàng và xóa
+kết quả quét cũ khi mất USB. Web làm mới trạng thái mỗi 2 giây. Sau khi cập nhật
+code lên Pi, cần khởi động lại tiến trình bridge và build lại frontend theo cách
+triển khai hiện có. Sửa code trên laptop không tự cập nhật dịch vụ trên Pi.
+
+## Vòng đời node và khu (gateway 1.1.0)
+
+Khu chỉ được tạo khi cả `provisioned`, `appkey`, `bind`, `publication` đều true.
+Node đang cấu hình vẫn xuất hiện trong BLE Mesh nhưng chưa tạo khu. Khu mẫu hoặc
+khu không gắn node đã cấu hình không xuất hiện trong tổng quan.
+
+Nút xóa gửi `{"action":"remove","uuid":"..."}`. Gateway gửi Config Node Reset,
+chờ Node Reset Status rồi xóa DevKey/bản ghi node trong NVS và phát
+`{"event":"node_removed","uuid":"..."}`. Pi chỉ xóa node, khu không còn node
+và dữ liệu của khu đó khi nhận xác nhận. Dấu xóa được lưu trong SQLite để bản
+snapshot cũ không tạo lại node sau F5/restart. Node tắt nguồn khiến xóa thất bại;
+bật node rồi thử lại. Sau reset thành công có thể Scan và Join node lại.
