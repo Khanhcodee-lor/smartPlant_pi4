@@ -83,6 +83,7 @@ class FirebaseRTDB:
                     {'databaseURL': FIREBASE_DATABASE_URL},
                     name='smart-plant-rtdb',
                 )
+            self.app = app
             self.database = db
             self.root = db.reference('/', app=app)
             self.status = 'ready'
@@ -92,22 +93,22 @@ class FirebaseRTDB:
 
     def _prune_history(self, firebase_key, max_entries=100):
         """Giữ tối đa max_entries bản ghi mới nhất, xóa các bản ghi cũ hơn."""
-        if not self.database or max_entries <= 0:
+        if not self.database or not getattr(self, 'root', None) or max_entries <= 0:
             return
         try:
-            history_ref = self.database.reference(f'/{firebase_key}/history')
+            history_ref = self.root.child(f'{firebase_key}/history')
             data = history_ref.order_by_key().get()
             if data and isinstance(data, dict) and len(data) > max_entries:
                 excess = len(data) - max_entries
                 sorted_keys = sorted(data.keys())
                 keys_to_delete = sorted_keys[:excess]
-                updates = {f'/{firebase_key}/history/{k}': None for k in keys_to_delete}
+                updates = {f'{firebase_key}/history/{k}': None for k in keys_to_delete}
                 self.root.update(updates)
         except Exception:
             pass
 
     def write_sensor(self, mesh_address, zone_id, values, node_name=None, zone_name=None):
-        if self.database is None:
+        if self.database is None or not getattr(self, 'root', None):
             return False
         try:
             import re
@@ -140,10 +141,10 @@ class FirebaseRTDB:
                 'created_at': now_str,
             }
 
-            history_key = self.database.reference(f'/{firebase_key}/history').push().key
+            history_key = self.root.child(f'{firebase_key}/history').push().key
             self.root.update({
-                f'/{firebase_key}/sensor': sensor_data,
-                f'/{firebase_key}/history/{history_key}': history_reading,
+                f'{firebase_key}/sensor': sensor_data,
+                f'{firebase_key}/history/{history_key}': history_reading,
             })
 
             # Tự động duy trì tối đa N bản ghi gần nhất (Rolling Window) trong background thread
