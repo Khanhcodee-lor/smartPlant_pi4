@@ -53,3 +53,19 @@ Dưới đây là các ghi chú về những công việc AI Agent đã thực h
      - Đã thêm Webhook thành công trên GitHub Settings của repository `Khanhcodee-lor/smartPlant_pi4`.
      - Kiểm thử thực tế (End-to-End Test): Ping và Push event đã được gửi từ GitHub, Pi nhận diện và hoàn tất cập nhật trong 2 giây.
 
+## 5. Định tuyến dữ liệu Firebase theo tên Node & Thêm tính năng đổi tên Node (02/10/2026)
+- **Vấn đề**:
+  - Ban đầu dữ liệu đẩy lên Firebase theo đường dẫn hex tĩnh `/ble_sensors/0x07fa/...` thay vì phân loại theo tên node trực quan (`node1`, `node2`...) do người dùng thiết lập trên Web Dashboard.
+- **Hành động**:
+  - Chép khóa bí mật Firebase [pi4-iot.json](file:///home/khanh0209/workspace/pi_4_thiIOT/smartPlant_pi4/ai_engine/config/pi4-iot.json) lên Pi và tạo [server/.env](file:///home/khanh0209/workspace/pi_4_thiIOT/smartPlant_pi4/server/.env).
+  - Cài đặt thư viện `firebase-admin` vào môi trường ảo `venv` trên Pi và kích hoạt qua PM2.
+  - Sửa đổi [ble_mesh_gateway.py](file:///home/khanh0209/workspace/pi_4_thiIOT/smartPlant_pi4/ai_engine/ble_mesh_gateway.py) để truy vấn tên node (`ble_nodes.name`) và zone tương ứng, đẩy dữ liệu trực tiếp vào:
+    * `/{node_name}/sensor/`: Chứa số đo mới nhất (nhiệt độ, độ ẩm, ánh sáng, độ ẩm đất, zone, timestamp).
+    * `/{node_name}/history/{push_key}`: Lưu trữ lịch sử từng lần đo.
+  - Thêm API `PATCH /api/ble/nodes/:id` trong [server/routes/ble.js](file:///home/khanh0209/workspace/pi_4_thiIOT/smartPlant_pi4/server/routes/ble.js) cho phép cập nhật tên node bất kỳ lúc nào.
+  - Cập nhật giao diện tab BLE Mesh trong [BleMeshTab.jsx](file:///home/khanh0209/workspace/pi_4_thiIOT/smartPlant_pi4/client/src/components/BleMeshTab.jsx): cho phép người dùng click icon bút chì sửa tên Node (VD: `node1`, `node2`) trực tiếp trên Web Dashboard.
+- **Kết quả**:
+  - Đã đổi tên Node hiện tại thành `node1`.
+  - Dữ liệu đã xuất hiện chuẩn xác trên Firebase Realtime Database tại nhánh `https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app/node1/sensor`.
+
+
