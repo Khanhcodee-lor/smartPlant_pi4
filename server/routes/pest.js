@@ -132,14 +132,28 @@ function hasPestDetection(result) {
   return Boolean(pestType && !/healthy|cây khỏe mạnh/i.test(pestType));
 }
 
-async function uploadCaptureImage(bucket, getDownloadURL, captureId, filename, bytes) {
+function getCaptureTimeFields(date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date);
+  const value = type => parts.find(part => part.type === type)?.value;
+  return {
+    capture_date: `${value('year')}-${value('month')}-${value('day')}`,
+    capture_time: `${value('hour')}:${value('minute')}:${value('second')}`,
+    capture_timezone: 'Asia/Ho_Chi_Minh'
+  };
+}
+
+async function uploadCaptureImage(bucket, getDownloadURL, captureId, filename, bytes, contentType = 'image/jpeg') {
   const storagePath = `plant-captures/${captureId}/${filename}`;
   const file = bucket.file(storagePath);
   const downloadToken = randomUUID();
   await file.save(bytes, {
     resumable: false,
     metadata: {
-      contentType: 'image/jpeg',
+      contentType,
       metadata: {
         firebaseStorageDownloadTokens: downloadToken,
         captureId
@@ -153,18 +167,83 @@ async function uploadCaptureImage(bucket, getDownloadURL, captureId, filename, b
   };
 }
 
-// POST /api/pests/analyze — Kích hoạt AI phân tích 1 ảnh cụ thể ngay lập tức
-router.post('/analyze', (req, res) => {
+async function saveTestImageCapture(filename, filePath, result, zoneId, capturedAt) {
+  const captureId = randomUUID();
+  const { firestore, bucket, FieldValue, getDownloadURL } = getFirebaseServices();
+  const extension = path.extname(filename).toLowerCase() || '.jpg';
+  const contentTypeByExtension = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.bmp': 'image/bmp'
+  };
+  const originalImage = await uploadCaptureImage(
+    bucket, getDownloadURL, captureId, `original${extension}`,
+    fs.readFileSync(filePath), contentTypeByExtension[extension]
+  );
+
+  let annotatedImage = null;
+  let annotationStorageError = null;
+  if (hasPestDetection(result) && result.image_path) {
+    const publicDir = path.resolve(__dirname, '../public');
+    const annotatedName = path.basename(String(result.image_path).split('?')[0]);
+    const annotatedPath = path.resolve(publicDir, annotatedName);
+    if (annotatedPath.startsWith(`${publicDir}${path.sep}`) && fs.existsSync(annotatedPath)) {
+      try {
+        annotatedImage = await uploadCaptureImage(
+          bucket, getDownloadURL, captureId, 'ai-annotated.jpg',
+          fs.readFileSync(annotatedPath), 'image/jpeg'
+        );
+      } catch (error) {
+        annotationStorageError = error.message;
+        console.error('[Test Image] Không lưu được ảnh AI chú thích:', annotationStorageError);
+      }
+    }
+  }
+
+  const confidenceValue = result?.confidence;
+  const confidence = confidenceValue !== null && confidenceValue !== undefined && confidenceValue !== '' &&
+    Number.isFinite(Number(confidenceValue)) ? Number(confidenceValue) : null;
+  const record = {
+    capture_id: captureId,
+    source: 'pi_test_image',
+    source_filename: filename,
+    status: hasPestDetection(result) ? 'detected' : 'no_detection',
+    captured_at: FieldValue.serverTimestamp(),
+    captured_at_iso: capturedAt.toISOString(),
+    ...getCaptureTimeFields(capturedAt),
+    zone_id: Number(result?.zone_id || zoneId),
+    pest_type: result?.pest_type || null,
+    confidence,
+    severity: result?.severity || null,
+    notes: result?.notes || null,
+    original_storage_path: originalImage.storagePath,
+    original_image_url: originalImage.downloadUrl,
+    annotated_storage_path: annotatedImage?.storagePath || null,
+    annotated_image_url: annotatedImage?.downloadUrl || null,
+    analysis_error: null,
+    annotation_storage_error: annotationStorageError
+  };
+  await firestore.collection('plant_captures').doc(captureId).set(record);
+
+  return { captureId, originalImage, annotatedImage, record, confidence };
+}
+
+// POST /api/pests/analyze — Phân tích ảnh trên Pi và lưu ảnh/kết quả lên Firebase
+router.post('/analyze', async (req, res) => {
   try {
     const { filename, image_path } = req.body;
-    let targetPath = image_path;
-    
-    if (!targetPath && filename) {
-      targetPath = path.join(getTestImagesDir(), filename);
-    }
+    const requestedImage = filename || image_path;
+    const imageName = requestedImage ? path.basename(String(requestedImage)) : '';
+    const testImagesDir = path.resolve(getTestImagesDir());
+    const targetPath = imageName ? path.resolve(testImagesDir, imageName) : '';
 
-    if (!targetPath || !fs.existsSync(targetPath)) {
+    if (!imageName || !targetPath.startsWith(`${testImagesDir}${path.sep}`) || !fs.existsSync(targetPath)) {
       return res.status(400).json({ error: 'File ảnh không tồn tại: ' + targetPath });
+    }
+    const extension = path.extname(imageName).toLowerCase();
+    if (!['.jpg', '.jpeg', '.png', '.bmp'].includes(extension)) {
+      return res.status(400).json({ error: 'Định dạng ảnh test không được hỗ trợ.' });
     }
 
     const binary = getEngineBinaryPath();
@@ -172,55 +251,47 @@ router.post('/analyze', (req, res) => {
       return res.status(500).json({ error: 'Không tìm thấy binary smart_plant_engine: ' + binary });
     }
 
-    execFile(binary, ['--analyze', targetPath], { timeout: 120000, maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('[AI Analyze Error]:', error, stderr);
-        return res.status(500).json({ error: error.message, stderr });
-      }
+    const capturedAt = new Date();
+    const result = await analyzeImage(binary, targetPath);
+    if (!result || typeof result !== 'object') {
+      throw new Error('AI engine không trả về kết quả nhận diện hợp lệ.');
+    }
+    const requestedZoneId = Number(req.body?.zone_id ?? 1);
+    const zoneId = Number.isInteger(requestedZoneId) && requestedZoneId > 0 ? requestedZoneId : 1;
+    if (result.zone_id == null) result.zone_id = zoneId;
 
-      try {
-        // Tìm dòng JSON cuối cùng trong stdout
-        const lines = stdout.trim().split('\n');
-        let jsonStr = '';
-        for (let i = lines.length - 1; i >= 0; i--) {
-          if (lines[i].trim().startsWith('{')) {
-            jsonStr = lines[i].trim();
-            break;
-          }
-        }
+    const saved = await saveTestImageCapture(imageName, targetPath, result, zoneId, capturedAt);
 
-        if (!jsonStr) {
-          return res.status(500).json({ error: 'Không đọc được kết quả JSON từ AI engine', stdout });
-        }
+    if (hasPestDetection(result)) {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        result.pest_type,
+        saved.confidence ?? 0.9,
+        saved.annotatedImage?.downloadUrl || result.image_path || saved.originalImage.downloadUrl,
+        Number(result.zone_id || zoneId),
+        result.severity || 'medium',
+        result.notes || 'Phân tích ảnh test từ thẻ nhớ Pi'
+      );
+    }
 
-        const result = JSON.parse(jsonStr);
-
-        // Lưu bản ghi vào database nếu có phát hiện bệnh
-        if (result.pest_type && result.pest_type !== 'Cây khỏe mạnh (Healthy)') {
-          const db = getDb();
-          const stmt = db.prepare(`
-            INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          stmt.run(
-            result.pest_type,
-            result.confidence || 0.9,
-            result.image_path || '/latest_detection.jpg',
-            result.zone_id || 1,
-            result.severity || 'medium',
-            result.notes || 'Phân tích từ ảnh chọn trong thẻ nhớ'
-          );
-        }
-
-        res.json({
-          success: true,
-          data: result
-        });
-      } catch (parseErr) {
-        res.status(500).json({ error: 'Lỗi parse JSON: ' + parseErr.message, stdout });
+    res.json({
+      success: true,
+      analysis_status: saved.record.status,
+      data: result,
+      capture: {
+        id: saved.captureId,
+        source_filename: imageName,
+        original_storage_path: saved.originalImage.storagePath,
+        original_image_url: saved.originalImage.downloadUrl,
+        annotated_storage_path: saved.annotatedImage?.storagePath || null,
+        annotated_image_url: saved.annotatedImage?.downloadUrl || null
       }
     });
   } catch (err) {
+    console.error('[Test Image Analyze Error]:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -249,19 +320,7 @@ router.post('/capture-analyze', async (req, res) => {
     }
 
     capturedAt = new Date();
-    const localTimeParts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Ho_Chi_Minh',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23'
-    }).formatToParts(capturedAt);
-    const localTimePart = type => localTimeParts.find(part => part.type === type)?.value;
-    const captureDate = `${localTimePart('year')}-${localTimePart('month')}-${localTimePart('day')}`;
-    const captureTime = `${localTimePart('hour')}:${localTimePart('minute')}:${localTimePart('second')}`;
+    const captureDateFields = getCaptureTimeFields(capturedAt);
 
     const filename = `capture_${capturedAt.toISOString().replace(/[:.]/g, '-')}.jpg`;
     const dir = getTestImagesDir();
@@ -326,9 +385,7 @@ router.post('/capture-analyze', async (req, res) => {
       status: analysisStatus,
       captured_at: FieldValue.serverTimestamp(),
       captured_at_iso: capturedAt.toISOString(),
-      capture_date: captureDate,
-      capture_time: captureTime,
-      capture_timezone: 'Asia/Ho_Chi_Minh',
+      ...captureDateFields,
       zone_id: Number(result?.zone_id || zoneId),
       pest_type: result?.pest_type || null,
       confidence,

@@ -127,11 +127,14 @@ export async function analyzeImage(filename, imagePath = null) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename, image_path: imagePath })
     });
-    if (!res.ok) throw new Error('Analyze Error');
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      return { ...errorData, success: false };
+    }
     return await res.json();
   } catch (err) {
     console.error('[API] /pests/analyze:', err.message);
-    return null;
+    return { success: false, error: err.message };
   }
 }
 

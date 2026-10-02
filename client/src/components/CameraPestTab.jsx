@@ -64,10 +64,14 @@ export default function CameraPestTab() {
 
     const res = await analyzeImage(filename);
     if (res?.success && res?.data) {
-      setAnalysisResult(res.data);
+      setAnalysisResult({ ...res.data, firebase_capture_id: res.capture?.id || null });
       // Hiển thị ảnh đã vẽ bounding box (b64 hoặc url)
       if (res.data.image_b64) {
         setActiveTestImage(res.data.image_b64);
+      } else if (res.capture?.annotated_image_url) {
+        setActiveTestImage(res.capture.annotated_image_url);
+      } else if (res.capture?.original_image_url) {
+        setActiveTestImage(res.capture.original_image_url);
       } else if (res.data.image_path) {
         setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
       } else if (directUrl) {
@@ -77,6 +81,8 @@ export default function CameraPestTab() {
       await refreshHistoryAfterAnalysis();
     } else {
       if (directUrl) setActiveTestImage(directUrl);
+      setCaptureError(res?.error || 'Không thể phân tích hoặc lưu ảnh test lên Firebase.');
+      setTimeout(() => setCaptureError(null), 8000);
     }
     setAnalyzing(false);
   };
@@ -123,7 +129,7 @@ export default function CameraPestTab() {
     const res = await captureAndAnalyze();
     if (res?.success) {
       setIsLiveStreamMode(false);
-      setAnalysisResult(res.data || null);
+      setAnalysisResult(res.data ? { ...res.data, firebase_capture_id: res.capture?.id || null } : null);
 
       if (res.data?.image_b64) setActiveTestImage(res.data.image_b64);
       else if (res.capture?.annotated_image_url) setActiveTestImage(res.capture.annotated_image_url);
@@ -265,6 +271,11 @@ export default function CameraPestTab() {
                   Kết quả phân tích: <span className="text-emerald-700">{analysisResult.pest_type}</span> ({Math.round(analysisResult.confidence * 100)}%)
                 </p>
                 <p className="text-[11px] text-slate-600 mt-0.5">{analysisResult.notes}</p>
+                {analysisResult.firebase_capture_id && (
+                  <p className="text-[10px] text-emerald-700 mt-0.5">
+                    Đã lưu Firestore/Storage · {analysisResult.firebase_capture_id}
+                  </p>
+                )}
               </div>
             </div>
             <button 
