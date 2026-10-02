@@ -140,7 +140,7 @@ GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`; thay đổi trong thư mục `server/` cũng khởi động lại tiến trình `smart-plant-server`. Dữ liệu được ghi như sau:
 
 - Storage: `plant-captures/{captureId}/original.<ext>` cho ảnh camera và ảnh test từ thẻ nhớ; thêm `ai-annotated.jpg` khi AI phát hiện sâu bệnh.
-- Firestore: collection `plant_captures`, document ID là `captureId`. Các trường gồm `source` (`camera` hoặc `pi_test_image`), `source_filename` với ảnh test, `status` (`detected`, `no_detection`, `analysis_failed`), `captured_at` (Firestore Timestamp), `captured_at_iso` (UTC), `capture_date` và `capture_time` (giờ Việt Nam), `zone_id`, `pest_type`, `confidence`, `severity`, `notes`, đường dẫn Storage và URL ảnh.
+- Firestore: collection `plant_captures`, document ID là `captureId`. Các trường gồm `source` (`camera` hoặc `pi_test_image`), `source_location` và `source_filename` với ảnh test, `status` (`detected`, `no_detection`, `analysis_failed`), `captured_at` (Firestore Timestamp), `captured_at_iso` (UTC), `capture_date` và `capture_time` (giờ Việt Nam), `zone_id`, `pest_type`, `confidence`, `severity`, `notes`, đường dẫn Storage và URL ảnh.
 - Cả trường hợp không phát hiện bệnh vẫn lưu ảnh và một tài liệu Firestore. Lỗi AI được ghi vào `analysis_error`; lỗi khi lưu ảnh chú thích được ghi vào `annotation_storage_error`.
 
 URL ảnh do Admin SDK tạo là URL truy cập dài hạn: ai có URL đều có thể mở ảnh. Server dùng service-account nên khóa chỉ được giữ trên Pi; Admin SDK có quyền quản trị và không bị giới hạn bởi Firestore/Storage Security Rules của ứng dụng khách.

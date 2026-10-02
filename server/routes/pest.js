@@ -207,6 +207,7 @@ async function saveTestImageCapture(filename, filePath, result, zoneId, captured
   const record = {
     capture_id: captureId,
     source: 'pi_test_image',
+    source_location: 'raspberry_pi_test_images',
     source_filename: filename,
     status: hasPestDetection(result) ? 'detected' : 'no_detection',
     captured_at: FieldValue.serverTimestamp(),
