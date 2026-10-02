@@ -125,6 +125,26 @@ sudo apt install -y libopencv-dev
 npm install -g pm2
 ```
 
+### Firebase: lưu ảnh camera và kết quả nhận diện
+
+Backend dùng Firebase Admin SDK để lưu ảnh trong Cloud Storage for Firebase và tạo một tài liệu Firestore cho mỗi lần chụp. Trong Firebase Console của dự án `pi4-iot-1b7bb`, hãy bật Firestore Database và Storage. Cloud Storage for Firebase yêu cầu dự án dùng gói Blaze. Mở **Storage → Files**, lấy đúng tên bucket đang hiển thị (bỏ tiền tố `gs://`) rồi đặt vào `FIREBASE_STORAGE_BUCKET`; bucket có thể mang tên `.firebasestorage.app` hoặc `.appspot.com` tùy thời điểm tạo dự án.
+
+Đặt service-account JSON tại `ai_engine/config/pi4-iot.json` trên Pi. File này đã bị Git ignore; không đưa khóa lên GitHub. Trên Pi, tạo/cập nhật `server/.env` theo các dòng sau, thay bucket bằng tên lấy trong Firebase Console nếu khác:
+
+```dotenv
+FIREBASE_PROJECT_ID=pi4-iot-1b7bb
+FIREBASE_STORAGE_BUCKET=pi4-iot-1b7bb.firebasestorage.app
+GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
+```
+
+Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`; thay đổi trong thư mục `server/` cũng khởi động lại tiến trình `smart-plant-server`. Dữ liệu được ghi như sau:
+
+- Storage: `plant-captures/{captureId}/original.jpg` cho mọi ảnh chụp; thêm `ai-annotated.jpg` khi AI phát hiện sâu bệnh.
+- Firestore: collection `plant_captures`, document ID là `captureId`. Các trường gồm `status` (`detected`, `no_detection`, `analysis_failed`), `captured_at` (Firestore Timestamp), `captured_at_iso` (UTC), `capture_date` và `capture_time` (giờ Việt Nam), `zone_id`, `pest_type`, `confidence`, `severity`, `notes`, đường dẫn Storage và URL ảnh.
+- Cả trường hợp không phát hiện bệnh vẫn lưu ảnh và một tài liệu Firestore. Lỗi AI được ghi vào `analysis_error`; lỗi khi lưu ảnh chú thích được ghi vào `annotation_storage_error`.
+
+URL ảnh do Admin SDK tạo là URL truy cập dài hạn: ai có URL đều có thể mở ảnh. Server dùng service-account nên khóa chỉ được giữ trên Pi; Admin SDK có quyền quản trị và không bị giới hạn bởi Firestore/Storage Security Rules của ứng dụng khách.
+
 Nếu build lỗi, phía Pi gửi log:
 
 ```bash

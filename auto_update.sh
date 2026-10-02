@@ -78,6 +78,9 @@ fi
 
 # 4. Khởi động lại các dịch vụ PM2
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Khởi động lại các dịch vụ Smart Plant..."
+if echo "$CHANGED_FILES" | grep -q "^server/"; then
+    pm2 restart smart-plant-server
+fi
 if [ -x "$SCRIPT_DIR/ai_engine/.venv/bin/python" ]; then
     pm2 delete smart-plant-ble 2>/dev/null || true
     pm2 start "$SCRIPT_DIR/ai_engine/ble_mesh_gateway.py" --name smart-plant-ble \

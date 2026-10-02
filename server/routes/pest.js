@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 const { getDb } = require('../db/database');
+const { getFirebaseServices } = require('../firebase');
 
 function getTestImagesDir() {
   const candidates = [
@@ -102,6 +104,55 @@ function getEngineBinaryPath() {
   return candidates[0];
 }
 
+function analyzeImage(binary, filePath) {
+  return new Promise((resolve, reject) => {
+    execFile(binary, ['--analyze', filePath], {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024 * 50
+    }, (error, stdout, stderr) => {
+      if (error) {
+        return reject(new Error(`AI engine lỗi: ${error.message}${stderr ? `; ${stderr.trim()}` : ''}`));
+      }
+
+      const lines = stdout.trim().split('\n');
+      const jsonLine = [...lines].reverse().find(line => line.trim().startsWith('{'));
+      if (!jsonLine) return reject(new Error('Không đọc được JSON từ AI engine'));
+
+      try {
+        resolve(JSON.parse(jsonLine));
+      } catch (parseError) {
+        reject(new Error(`JSON AI không hợp lệ: ${parseError.message}`));
+      }
+    });
+  });
+}
+
+function hasPestDetection(result) {
+  const pestType = String(result?.pest_type || '').trim();
+  return Boolean(pestType && !/healthy|cây khỏe mạnh/i.test(pestType));
+}
+
+async function uploadCaptureImage(bucket, getDownloadURL, captureId, filename, bytes) {
+  const storagePath = `plant-captures/${captureId}/${filename}`;
+  const file = bucket.file(storagePath);
+  const downloadToken = randomUUID();
+  await file.save(bytes, {
+    resumable: false,
+    metadata: {
+      contentType: 'image/jpeg',
+      metadata: {
+        firebaseStorageDownloadTokens: downloadToken,
+        captureId
+      }
+    }
+  });
+
+  return {
+    storagePath,
+    downloadUrl: await getDownloadURL(file)
+  };
+}
+
 // POST /api/pests/analyze — Kích hoạt AI phân tích 1 ảnh cụ thể ngay lập tức
 router.post('/analyze', (req, res) => {
   try {
@@ -179,8 +230,11 @@ const USTREAMER_URL = process.env.USTREAMER_URL || 'http://127.0.0.1:8080';
 
 // POST /api/pests/capture-analyze — Chụp snapshot từ camera rồi phân tích AI ngay (tất cả phía server)
 router.post('/capture-analyze', async (req, res) => {
+  const captureId = randomUUID();
+  let capturedAt;
+  let filePath;
+
   try {
-    // Bước 1: Chụp snapshot từ ustreamer
     console.log('[Capture] Đang chụp snapshot từ camera...');
     let snapshotData;
     try {
@@ -194,71 +248,158 @@ router.post('/capture-analyze', async (req, res) => {
       return res.status(502).json({ error: 'Không thể chụp ảnh từ camera: ' + snapErr.message });
     }
 
-    // Bước 2: Lưu ảnh vào thư mục test_images
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-    const filename = `capture_${timestamp}.jpg`;
+    capturedAt = new Date();
+    const localTimeParts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(capturedAt);
+    const localTimePart = type => localTimeParts.find(part => part.type === type)?.value;
+    const captureDate = `${localTimePart('year')}-${localTimePart('month')}-${localTimePart('day')}`;
+    const captureTime = `${localTimePart('hour')}:${localTimePart('minute')}:${localTimePart('second')}`;
+
+    const filename = `capture_${capturedAt.toISOString().replace(/[:.]/g, '-')}.jpg`;
     const dir = getTestImagesDir();
-    const filePath = path.join(dir, filename);
+    filePath = path.join(dir, filename);
     fs.writeFileSync(filePath, snapshotData);
     console.log(`[Capture] Đã lưu ảnh: ${filePath} (${snapshotData.length} bytes)`);
 
-    // Bước 3: Gọi AI engine phân tích
     const binary = getEngineBinaryPath();
-    if (!fs.existsSync(binary)) {
-      return res.status(500).json({ error: 'Không tìm thấy binary smart_plant_engine: ' + binary });
+    const requestedZoneId = Number(req.body?.zone_id ?? 1);
+    const zoneId = Number.isInteger(requestedZoneId) && requestedZoneId > 0 ? requestedZoneId : 1;
+    let result = null;
+    let analysisStatus = 'analysis_failed';
+    let analysisError = null;
+
+    try {
+      if (!fs.existsSync(binary)) {
+        throw new Error('Không tìm thấy binary smart_plant_engine: ' + binary);
+      }
+      result = await analyzeImage(binary, filePath);
+      if (result && typeof result === 'object') {
+        if (result.zone_id == null) result.zone_id = zoneId;
+        analysisStatus = hasPestDetection(result) ? 'detected' : 'no_detection';
+      } else {
+        result = null;
+        analysisStatus = 'no_detection';
+      }
+    } catch (error) {
+      analysisError = error.message;
+      console.error('[Capture AI Error]:', analysisError);
     }
 
-    execFile(binary, ['--analyze', filePath], { timeout: 120000, maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('[Capture AI Error]:', error.message, stderr);
-        return res.status(500).json({ error: 'AI engine lỗi: ' + error.message, stderr });
-      }
+    const { firestore, bucket, FieldValue, getDownloadURL } = getFirebaseServices();
+    const originalImage = await uploadCaptureImage(
+      bucket, getDownloadURL, captureId, 'original.jpg', snapshotData
+    );
 
-      try {
-        const lines = stdout.trim().split('\n');
-        let jsonStr = '';
-        for (let i = lines.length - 1; i >= 0; i--) {
-          if (lines[i].trim().startsWith('{')) {
-            jsonStr = lines[i].trim();
-            break;
-          }
-        }
-
-        if (!jsonStr) {
-          return res.status(500).json({ error: 'Không đọc được kết quả JSON từ AI engine', stdout });
-        }
-
-        const result = JSON.parse(jsonStr);
-
-        // Lưu vào database
-        if (result.pest_type && result.pest_type !== 'Cây khỏe mạnh (Healthy)') {
-          const db = getDb();
-          const stmt = db.prepare(`
-            INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          stmt.run(
-            result.pest_type,
-            result.confidence || 0.9,
-            result.image_path || '/latest_detection.jpg',
-            result.zone_id || 1,
-            result.severity || 'medium',
-            result.notes || 'Chụp trực tiếp từ camera và phân tích'
+    let annotatedImage = null;
+    let annotationStorageError = null;
+    if (hasPestDetection(result) && result.image_path) {
+      const publicDir = path.resolve(__dirname, '../public');
+      const annotatedName = path.basename(String(result.image_path).split('?')[0]);
+      const annotatedPath = path.resolve(publicDir, annotatedName);
+      if (annotatedPath.startsWith(`${publicDir}${path.sep}`) && fs.existsSync(annotatedPath)) {
+        try {
+          annotatedImage = await uploadCaptureImage(
+            bucket, getDownloadURL, captureId, 'ai-annotated.jpg', fs.readFileSync(annotatedPath)
           );
+        } catch (error) {
+          annotationStorageError = error.message;
+          console.error('[Capture] Không lưu được ảnh AI chú thích:', annotationStorageError);
         }
+      }
+    }
 
-        console.log(`[Capture] Kết quả: ${result.pest_type} (${Math.round((result.confidence || 0) * 100)}%)`);
-        res.json({
-          success: true,
-          data: result
-        });
-      } catch (parseErr) {
-        res.status(500).json({ error: 'Lỗi parse JSON: ' + parseErr.message, stdout });
+    const confidenceValue = result?.confidence;
+    const confidence = confidenceValue !== null && confidenceValue !== undefined && confidenceValue !== '' &&
+      Number.isFinite(Number(confidenceValue)) ? Number(confidenceValue) : null;
+
+    const captureRecord = {
+      capture_id: captureId,
+      source: 'camera',
+      status: analysisStatus,
+      captured_at: FieldValue.serverTimestamp(),
+      captured_at_iso: capturedAt.toISOString(),
+      capture_date: captureDate,
+      capture_time: captureTime,
+      capture_timezone: 'Asia/Ho_Chi_Minh',
+      zone_id: Number(result?.zone_id || zoneId),
+      pest_type: result?.pest_type || null,
+      confidence,
+      severity: result?.severity || null,
+      notes: result?.notes || null,
+      original_storage_path: originalImage.storagePath,
+      original_image_url: originalImage.downloadUrl,
+      annotated_storage_path: annotatedImage?.storagePath || null,
+      annotated_image_url: annotatedImage?.downloadUrl || null,
+      analysis_error: analysisError,
+      annotation_storage_error: annotationStorageError
+    };
+    await firestore.collection('plant_captures').doc(captureId).set(captureRecord);
+
+    if (hasPestDetection(result)) {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        result.pest_type,
+        confidence ?? 0.9,
+        annotatedImage?.downloadUrl || result.image_path || originalImage.downloadUrl,
+        captureRecord.zone_id,
+        result.severity || 'medium',
+        result.notes || 'Chụp trực tiếp từ camera và phân tích'
+      );
+    }
+
+    if (analysisError) {
+      return res.json({
+        success: true,
+        analysis_status: analysisStatus,
+        analysis_error: analysisError,
+        data: null,
+        capture: {
+          id: captureId,
+          original_storage_path: originalImage.storagePath,
+          original_image_url: originalImage.downloadUrl,
+          preview_url: `/api/pests/test-image/${encodeURIComponent(filename)}`
+        }
+      });
+    }
+
+    if (result && !result.image_path) {
+      result.image_path = `/api/pests/test-image/${encodeURIComponent(filename)}`;
+    }
+    console.log(`[Capture] Đã lưu Firestore/Storage: ${captureId} (${analysisStatus})`);
+    res.json({
+      success: true,
+      analysis_status: analysisStatus,
+      data: result,
+      capture: {
+        id: captureId,
+        original_storage_path: originalImage.storagePath,
+        original_image_url: originalImage.downloadUrl,
+        annotated_storage_path: annotatedImage?.storagePath || null,
+        annotated_image_url: annotatedImage?.downloadUrl || null,
+        preview_url: `/api/pests/test-image/${encodeURIComponent(filename)}`
       }
     });
   } catch (err) {
     console.error('[Capture] Lỗi tổng:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message,
+      capture_id: captureId,
+      local_image_saved: Boolean(filePath && fs.existsSync(filePath)),
+      preview_url: filePath && fs.existsSync(filePath)
+        ? `/api/pests/test-image/${encodeURIComponent(path.basename(filePath))}`
+        : null
+    });
   }
 });
 

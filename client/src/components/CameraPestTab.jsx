@@ -121,16 +121,25 @@ export default function CameraPestTab() {
     // Giữ livestream trong lúc phân tích, chỉ tắt sau khi có kết quả
     
     const res = await captureAndAnalyze();
-    if (res?.success && res?.data) {
-      setIsLiveStreamMode(false); // Tắt livestream để hiện kết quả
-      setAnalysisResult(res.data);
-      if (res.data.image_b64) setActiveTestImage(res.data.image_b64);
-      else if (res.data.image_path) setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
-      
-      // Refresh lịch sử bệnh
+    if (res?.success) {
+      setIsLiveStreamMode(false);
+      setAnalysisResult(res.data || null);
+
+      if (res.data?.image_b64) setActiveTestImage(res.data.image_b64);
+      else if (res.capture?.annotated_image_url) setActiveTestImage(res.capture.annotated_image_url);
+      else if (res.capture?.original_image_url) setActiveTestImage(res.capture.original_image_url);
+      else if (res.capture?.preview_url) setActiveTestImage(`${res.capture.preview_url}?t=${Date.now()}`);
+      else if (res.data?.image_path) setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
+
+      if (res.analysis_error) {
+        setCaptureError('Đã lưu ảnh lên Firebase nhưng AI chưa phân tích được: ' + res.analysis_error);
+        setTimeout(() => setCaptureError(null), 8000);
+      }
       await refreshHistoryAfterAnalysis();
     } else {
-      setCaptureError('Không thể chụp ảnh hoặc AI phân tích lỗi. Vui lòng thử lại.');
+      setIsLiveStreamMode(false);
+      if (res?.preview_url) setActiveTestImage(`${res.preview_url}?t=${Date.now()}`);
+      setCaptureError(res?.error || 'Không thể chụp ảnh hoặc lưu lên Firebase. Vui lòng thử lại.');
       // Tự động ẩn lỗi sau 5 giây
       setTimeout(() => setCaptureError(null), 5000);
     }
@@ -564,4 +573,3 @@ export default function CameraPestTab() {
     </div>
   );
 }
-

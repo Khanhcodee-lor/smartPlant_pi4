@@ -146,7 +146,7 @@ export async function captureAndAnalyze() {
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       console.error('[API] capture-analyze error:', errData);
-      return null;
+      return { ...errData, success: false };
     }
     return await res.json();
   } catch (err) {
