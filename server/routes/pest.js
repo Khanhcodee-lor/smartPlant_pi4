@@ -209,6 +209,7 @@ async function saveTestImageCapture(filename, filePath, result, zoneId, captured
     source: 'pi_test_image',
     source_location: 'raspberry_pi_test_images',
     source_filename: filename,
+    source_path: `ai_engine/test_images/${filename}`,
     status: hasPestDetection(result) ? 'detected' : 'no_detection',
     captured_at: FieldValue.serverTimestamp(),
     captured_at_iso: capturedAt.toISOString(),
