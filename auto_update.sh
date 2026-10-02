@@ -68,8 +68,21 @@ if echo "$CHANGED_FILES" | grep -q "^ai_engine/" && echo "$CHANGED_FILES" | grep
     cd "$SCRIPT_DIR"
 fi
 
+# 3b. Cài Firebase Admin SDK riêng cho BLE gateway trong virtualenv.
+if [ -f "$SCRIPT_DIR/ai_engine/requirements-firebase.txt" ]; then
+    if [ ! -x "$SCRIPT_DIR/ai_engine/.venv/bin/python" ]; then
+        python3 -m venv "$SCRIPT_DIR/ai_engine/.venv"
+    fi
+    "$SCRIPT_DIR/ai_engine/.venv/bin/pip" install -r "$SCRIPT_DIR/ai_engine/requirements-firebase.txt"
+fi
+
 # 4. Khởi động lại các dịch vụ PM2
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Khởi động lại các dịch vụ Smart Plant..."
-pm2 restart smart-plant-ble smart-plant-engine
+if [ -x "$SCRIPT_DIR/ai_engine/.venv/bin/python" ]; then
+    pm2 delete smart-plant-ble 2>/dev/null || true
+    pm2 start "$SCRIPT_DIR/ai_engine/ble_mesh_gateway.py" --name smart-plant-ble \
+        --interpreter "$SCRIPT_DIR/ai_engine/.venv/bin/python" --cwd "$SCRIPT_DIR/ai_engine"
+fi
+pm2 restart smart-plant-engine
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✨ Cập nhật hoàn tất thành công lên commit $REMOTE!"

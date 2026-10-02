@@ -9,6 +9,51 @@ ESP32 sensor nodes <-- BLE Mesh --> ESP32 Gateway <-- USB serial --> Pi 4 <-- HT
 
 ## Cấu hình Pi
 
+### Đẩy số đo node BLE lên Firebase Realtime Database
+
+Gateway ghi mỗi bản tin sensor vào SQLite như trước, đồng thời cập nhật RTDB
+ngay sau khi nhận bản tin từ node. Cấu trúc dữ liệu:
+
+```text
+/ble_sensors/0x0002/latest
+/ble_sensors/0x0002/history/<push-id>
+```
+
+`latest` luôn là số đo mới nhất của node; `history` lưu các lần đo. Mỗi object
+có `temperature`, `humidity`, `light`, `soil_moisture`, `node_address`,
+`zone_id` và timestamp do Firebase tạo.
+
+Trên Pi, giữ service account tại
+`ai_engine/config/pi4-iot.json` (không commit khóa lên GitHub). Cài SDK vào
+virtualenv riêng:
+
+```bash
+cd /home/<pi-user>/Smart_Plant
+python3 -m venv ai_engine/.venv
+ai_engine/.venv/bin/pip install -r ai_engine/requirements-firebase.txt
+```
+
+Thêm vào `server/.env`:
+
+```env
+FIREBASE_ENABLED=true
+FIREBASE_DATABASE_URL=https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app
+GOOGLE_APPLICATION_CREDENTIALS=/home/<pi-user>/Smart_Plant/ai_engine/config/pi4-iot.json
+```
+
+Khởi động/restart gateway bằng Python trong virtualenv để các số đo BLE được
+đồng bộ lên Firebase:
+
+```bash
+pm2 delete smart-plant-ble 2>/dev/null || true
+pm2 start ai_engine/ble_mesh_gateway.py --name smart-plant-ble \
+  --interpreter "$PWD/ai_engine/.venv/bin/python" --cwd "$PWD/ai_engine"
+pm2 save
+```
+
+Sau đó mở Realtime Database → Data và xem `/ble_sensors`. Trạng thái kết nối
+Firebase của gateway có trong `/api/ble/status` dưới `firebase_status`.
+
 Tài khoản chạy gateway cần thuộc nhóm `dialout`:
 
 ```bash

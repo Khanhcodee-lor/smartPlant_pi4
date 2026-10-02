@@ -2,6 +2,7 @@
 build/
 ai_engine/build/
 ai_engine/build_aarch64/
+ai_engine/.venv/
 
 # === Node.js & Database ===
 server/node_modules/

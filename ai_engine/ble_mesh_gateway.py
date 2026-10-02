@@ -16,6 +16,24 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_server_env():
+    """Load plain KEY=VALUE settings shared with the Node server."""
+    env_path = ROOT / 'server/.env'
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key.strip(), value)
+
+
+load_server_env()
+
 SOCKET_PATH = os.environ.get('MESH_SOCKET_PATH', str(ROOT / 'ble_mesh.sock'))
 DB_PATH = os.environ.get('DB_PATH', str(ROOT / 'server/db/smart_plant.db'))
 SERIAL_PORT = os.environ.get('MESH_SERIAL_PORT')
@@ -25,6 +43,70 @@ REQUIRED_FLAGS = ('provisioned', 'appkey', 'bind', 'publication')
 MAX_LINE = 4096
 HANDSHAKE_TIMEOUT = 20
 STATUS_INTERVAL = 2
+FIREBASE_DATABASE_URL = os.environ.get(
+    'FIREBASE_DATABASE_URL',
+    'https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app',
+)
+FIREBASE_CREDENTIALS = os.environ.get(
+    'GOOGLE_APPLICATION_CREDENTIALS', str(ROOT / 'ai_engine/config/pi4-iot.json')
+)
+
+
+class FirebaseRTDB:
+    """Optional Firebase mirror for live BLE sensor readings."""
+
+    def __init__(self):
+        self.database = None
+        self.status = 'disabled'
+        self.error = None
+        if os.environ.get('FIREBASE_ENABLED', '').lower() not in ('1', 'true', 'yes'):
+            return
+
+        try:
+            import firebase_admin
+            from firebase_admin import credentials, db
+
+            if not Path(FIREBASE_CREDENTIALS).is_file():
+                raise FileNotFoundError(f'Firebase service account not found: {FIREBASE_CREDENTIALS}')
+
+            try:
+                app = firebase_admin.get_app('smart-plant-rtdb')
+            except ValueError:
+                app = firebase_admin.initialize_app(
+                    credentials.Certificate(FIREBASE_CREDENTIALS),
+                    {'databaseURL': FIREBASE_DATABASE_URL},
+                    name='smart-plant-rtdb',
+                )
+            self.database = db
+            self.root = db.reference('/', app=app)
+            self.status = 'ready'
+        except Exception as error:
+            self.error = str(error)
+            self.status = 'error'
+
+    def write_sensor(self, mesh_address, zone_id, values):
+        if self.database is None:
+            return False
+        try:
+            node_key = mesh_address.lower()
+            reading = {
+                **values,
+                'node_address': mesh_address,
+                'zone_id': zone_id,
+                'timestamp': {'.sv': 'timestamp'},
+            }
+            history_key = self.database.reference(f'/ble_sensors/{node_key}/history').push().key
+            self.root.update({
+                f'/ble_sensors/{node_key}/latest': reading,
+                f'/ble_sensors/{node_key}/history/{history_key}': reading,
+            })
+            self.status = 'connected'
+            self.error = None
+            return True
+        except Exception as error:
+            self.status = 'error'
+            self.error = str(error)
+            return False
 
 
 def database():
@@ -96,6 +178,10 @@ class Gateway:
             'state': 'starting', 'ready': False, 'transport': 'usb_serial',
             'baud_rate': BAUD_RATE, 'devices': [], 'nodes': [],
         }
+        self.firebase = FirebaseRTDB()
+        self.status['firebase_status'] = self.firebase.status
+        if self.firebase.error:
+            self.status['firebase_error'] = self.firebase.error
 
     def snapshot(self):
         with self.lock:
@@ -352,18 +438,32 @@ class Gateway:
         if not 0 <= values['light'] <= 65535:
             raise ValueError('Light is outside accepted range')
         mesh_address = f'0x{address:04x}'
+        zone_id = None
         with database() as conn:
             node = conn.execute('SELECT zone_id,status FROM ble_nodes WHERE mesh_address=?',
                                 (mesh_address,)).fetchone()
             if node is None or node['status'] not in ('configured', 'active'):
                 raise ValueError(f'Unknown or unconfigured sensor node {mesh_address}')
+            zone_id = node['zone_id']
             conn.execute(
                 'INSERT INTO sensor_data(temperature,humidity,light,soil_moisture,zone_id) VALUES(?,?,?,?,?)',
-                (*values.values(), node['zone_id'])
+                (*values.values(), zone_id)
             )
             conn.execute('UPDATE ble_nodes SET status=?,last_seen=CURRENT_TIMESTAMP WHERE mesh_address=?',
                          ('active', mesh_address))
-        self.report(sensor_address=mesh_address, last_sensor=values)
+        firebase_ok = self.firebase.write_sensor(mesh_address, zone_id, values)
+        fields = {
+            'sensor_address': mesh_address,
+            'last_sensor': values,
+            'firebase_status': self.firebase.status,
+        }
+        if self.firebase.error:
+            fields['firebase_error'] = self.firebase.error
+        else:
+            self.status.pop('firebase_error', None)
+        if not firebase_ok and self.firebase.status == 'ready':
+            fields['firebase_status'] = 'error'
+        self.report(**fields)
 
     def command(self, request):
         action = request.get('action')
