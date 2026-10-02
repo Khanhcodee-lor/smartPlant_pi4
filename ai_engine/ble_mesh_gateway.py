@@ -59,6 +59,12 @@ class FirebaseRTDB:
         self.database = None
         self.status = 'disabled'
         self.error = None
+        self.write_counts = {}
+        try:
+            self.max_history = int(os.environ.get('FIREBASE_MAX_HISTORY', '100'))
+        except (ValueError, TypeError):
+            self.max_history = 100
+
         if os.environ.get('FIREBASE_ENABLED', '').lower() not in ('1', 'true', 'yes'):
             return
 
@@ -83,6 +89,22 @@ class FirebaseRTDB:
         except Exception as error:
             self.error = str(error)
             self.status = 'error'
+
+    def _prune_history(self, firebase_key, max_entries=100):
+        """Giữ tối đa max_entries bản ghi mới nhất, xóa các bản ghi cũ hơn."""
+        if not self.database or max_entries <= 0:
+            return
+        try:
+            history_ref = self.database.reference(f'/{firebase_key}/history')
+            data = history_ref.order_by_key().get()
+            if data and isinstance(data, dict) and len(data) > max_entries:
+                excess = len(data) - max_entries
+                sorted_keys = sorted(data.keys())
+                keys_to_delete = sorted_keys[:excess]
+                updates = {f'/{firebase_key}/history/{k}': None for k in keys_to_delete}
+                self.root.update(updates)
+        except Exception:
+            pass
 
     def write_sensor(self, mesh_address, zone_id, values, node_name=None, zone_name=None):
         if self.database is None:
@@ -123,6 +145,17 @@ class FirebaseRTDB:
                 f'/{firebase_key}/sensor': sensor_data,
                 f'/{firebase_key}/history/{history_key}': history_reading,
             })
+
+            # Tự động duy trì tối đa N bản ghi gần nhất (Rolling Window) trong background thread
+            count = self.write_counts.get(firebase_key, 0) + 1
+            self.write_counts[firebase_key] = count
+            if count % 5 == 0 or count <= 1:
+                threading.Thread(
+                    target=self._prune_history,
+                    args=(firebase_key, self.max_history),
+                    daemon=True
+                ).start()
+
             self.status = 'connected'
             self.error = None
             return True

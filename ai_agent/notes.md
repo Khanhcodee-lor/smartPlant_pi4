@@ -68,4 +68,17 @@ Dưới đây là các ghi chú về những công việc AI Agent đã thực h
   - Đã đổi tên Node hiện tại thành `node1`.
   - Dữ liệu đã xuất hiện chuẩn xác trên Firebase Realtime Database tại nhánh `https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app/node1/sensor`.
 
+## 6. Chiến lược lưu trữ lịch sử Firebase theo Rolling Window - Cách 2 (02/10/2026)
+- **Vấn đề**:
+  - Nếu lưu trữ toàn bộ lịch sử đo đạc vào Firebase theo thời gian thực (vài giây một lần), cơ sở dữ liệu Firebase Realtime Database sẽ nhanh chóng phình to hàng trăm nghìn bản ghi, vượt hạn ngạch 1 GB gói Free (Spark Plan) và làm chậm thao tác đọc lịch sử trên ứng dụng di động/web.
+- **Giải pháp (Cách 2 - Rolling Window)**:
+  - **Firebase RTDB**: Chỉ duy trì tối đa `100` bản ghi mới nhất cho mỗi node tại đường dẫn `/{node_name}/history/` (có thể tùy chỉnh qua biến `FIREBASE_MAX_HISTORY` trong `server/.env`).
+  - **Cơ chế Pruning tự động**:
+    * Trong `ai_engine/ble_mesh_gateway.py`, hàm `_prune_history` được gọi không đồng bộ qua daemon thread (định kỳ mỗi 5 lần ghi) để không làm block luồng ghi cảm biến chính.
+    * Thuật toán lấy danh sách keys lịch sử theo thứ tự tăng dần thời gian (`order_by_key`), xác định các key vượt quá ngưỡng `max_history` và thực hiện batch update gán `None` để xóa dứt điểm các bản ghi cũ nhất.
+  - **SQLite nội bộ trên Raspberry Pi**: Toàn bộ dữ liệu lịch sử đo đạc từ các node BLE vẫn được lưu trữ vĩnh viễn không bị xóa trong bảng `sensor_readings` của file cơ sở dữ liệu `server/db/smart_plant.db`.
+- **Kết quả**:
+  - Firebase luôn giữ trạng thái tinh gọn, mượt mà, không bao giờ lo vượt quota Free Tier.
+  - Vẫn có thể trích xuất toàn bộ dữ liệu lịch sử dài hạn từ SQLite trên Raspberry Pi khi cần xuất báo cáo hoặc huấn luyện AI.
+
 
