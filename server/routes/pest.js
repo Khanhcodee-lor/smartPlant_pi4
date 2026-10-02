@@ -263,24 +263,31 @@ router.post('/analyze', async (req, res) => {
 
     const saved = await saveTestImageCapture(imageName, targetPath, result, zoneId, capturedAt);
 
+    let localHistoryError = null;
     if (hasPestDetection(result)) {
-      const db = getDb();
-      db.prepare(`
-        INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(
-        result.pest_type,
-        saved.confidence ?? 0.9,
-        saved.annotatedImage?.downloadUrl || result.image_path || saved.originalImage.downloadUrl,
-        Number(result.zone_id || zoneId),
-        result.severity || 'medium',
-        result.notes || 'Phân tích ảnh test từ thẻ nhớ Pi'
-      );
+      try {
+        const db = getDb();
+        db.prepare(`
+          INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          result.pest_type,
+          saved.confidence ?? 0.9,
+          saved.annotatedImage?.downloadUrl || result.image_path || saved.originalImage.downloadUrl,
+          Number(result.zone_id || zoneId),
+          result.severity || 'medium',
+          result.notes || 'Phân tích ảnh test từ thẻ nhớ Pi'
+        );
+      } catch (error) {
+        localHistoryError = error.message;
+        console.error('[Test Image] Firebase đã lưu nhưng SQLite history ghi lỗi:', localHistoryError);
+      }
     }
 
     res.json({
       success: true,
       analysis_status: saved.record.status,
+      local_history_error: localHistoryError,
       data: result,
       capture: {
         id: saved.captureId,
