@@ -227,6 +227,16 @@ export async function assignNodeToZone(nodeId, zoneId) {
     console.error('[API] assignNodeToZone:', err.message);
     return null;
   }
+/** Update a BLE node name — PATCH /api/ble/nodes/:id */
+export async function updateBleNodeName(nodeId, name) {
+  const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'Không thể đổi tên node');
+  return result;
 }
 
 /** Remove a BLE node — DELETE /api/ble/nodes/:id */

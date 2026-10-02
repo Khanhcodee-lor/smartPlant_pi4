@@ -84,21 +84,44 @@ class FirebaseRTDB:
             self.error = str(error)
             self.status = 'error'
 
-    def write_sensor(self, mesh_address, zone_id, values):
+    def write_sensor(self, mesh_address, zone_id, values, node_name=None, zone_name=None):
         if self.database is None:
             return False
         try:
-            node_key = mesh_address.lower()
-            reading = {
+            import re
+            raw_name = str(node_name or '').strip()
+            clean_name = re.sub(r'[\.\$#\[\]/]', '', raw_name)
+            if not clean_name:
+                clean_name = f"node_{mesh_address.lower().replace('0x', '')}"
+
+            # Chuẩn hóa tên node: ví dụ "Node 1" -> "node1", "Node-1" -> "node1", "node 2" -> "node2"
+            match = re.match(r'^(node)[\s\-_]*(\d+)$', clean_name, re.IGNORECASE)
+            if match:
+                firebase_key = f"{match.group(1).lower()}{match.group(2)}"
+            else:
+                firebase_key = re.sub(r'\s+', '_', clean_name).lower()
+
+            now_str = time.strftime('%Y-%m-%d %H:%M:%S')
+            sensor_data = {
                 **values,
-                'node_address': mesh_address,
+                'mesh_address': mesh_address,
+                'node_name': raw_name or firebase_key,
                 'zone_id': zone_id,
+                'zone_name': zone_name or '',
+                'updated_at': now_str,
                 'timestamp': {'.sv': 'timestamp'},
             }
-            history_key = self.database.reference(f'/ble_sensors/{node_key}/history').push().key
+
+            history_reading = {
+                **values,
+                'timestamp': {'.sv': 'timestamp'},
+                'created_at': now_str,
+            }
+
+            history_key = self.database.reference(f'/{firebase_key}/history').push().key
             self.root.update({
-                f'/ble_sensors/{node_key}/latest': reading,
-                f'/ble_sensors/{node_key}/history/{history_key}': reading,
+                f'/{firebase_key}/sensor': sensor_data,
+                f'/{firebase_key}/history/{history_key}': history_reading,
             })
             self.status = 'connected'
             self.error = None
@@ -439,21 +462,33 @@ class Gateway:
             raise ValueError('Light is outside accepted range')
         mesh_address = f'0x{address:04x}'
         zone_id = None
+        node_name = None
+        zone_name = None
         with database() as conn:
-            node = conn.execute('SELECT zone_id,status FROM ble_nodes WHERE mesh_address=?',
-                                (mesh_address,)).fetchone()
+            node = conn.execute(
+                'SELECT bn.id, bn.name, bn.zone_id, bn.status, z.name as zone_name '
+                'FROM ble_nodes bn '
+                'LEFT JOIN zones z ON bn.zone_id = z.id '
+                'WHERE bn.mesh_address=?',
+                (mesh_address,)
+            ).fetchone()
             if node is None or node['status'] not in ('configured', 'active'):
                 raise ValueError(f'Unknown or unconfigured sensor node {mesh_address}')
             zone_id = node['zone_id']
+            node_name = node['name']
+            zone_name = node['zone_name']
             conn.execute(
                 'INSERT INTO sensor_data(temperature,humidity,light,soil_moisture,zone_id) VALUES(?,?,?,?,?)',
                 (*values.values(), zone_id)
             )
             conn.execute('UPDATE ble_nodes SET status=?,last_seen=CURRENT_TIMESTAMP WHERE mesh_address=?',
                          ('active', mesh_address))
-        firebase_ok = self.firebase.write_sensor(mesh_address, zone_id, values)
+        firebase_ok = self.firebase.write_sensor(
+            mesh_address, zone_id, values, node_name=node_name, zone_name=zone_name
+        )
         fields = {
             'sensor_address': mesh_address,
+            'node_name': node_name,
             'last_sensor': values,
             'firebase_status': self.firebase.status,
         }

@@ -59,6 +59,30 @@ router.post('/nodes/:id/assign-zone', (req, res) => {
   }
 });
 
+// PATCH /api/ble/nodes/:id - Update node name
+router.patch('/nodes/:id', (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Tên node không được để trống' });
+  }
+
+  try {
+    const db = getDb();
+    const node = db.prepare('SELECT * FROM ble_nodes WHERE id = ?').get(id);
+    if (!node) {
+      return res.status(404).json({ error: 'Node không tồn tại' });
+    }
+
+    db.prepare('UPDATE ble_nodes SET name = ? WHERE id = ?').run(name.trim(), id);
+    res.json({ success: true, message: `Đã đổi tên node thành ${name.trim()}`, data: { id, name: name.trim() } });
+  } catch (error) {
+    console.error('Error renaming node:', error);
+    res.status(500).json({ error: 'Failed to rename node' });
+  }
+});
+
 // The Python process owns the USB serial connection to the ESP32 gateway.
 const SOCKET_PATH = process.env.MESH_SOCKET_PATH || path.join(__dirname, '..', '..', 'ble_mesh.sock');
 function gatewayCommand(command) {

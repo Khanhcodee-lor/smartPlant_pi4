@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Bluetooth, RefreshCw, Radio, Cpu, Trash2, CheckCircle2, AlertCircle, Zap, Circle, Search, PlusCircle, Settings2 } from 'lucide-react';
-import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, removeBleNode, fetchZones } from '../api';
+import { Bluetooth, RefreshCw, Radio, Cpu, Trash2, CheckCircle2, AlertCircle, Zap, Circle, Search, PlusCircle, Settings2, Edit2, Check, X } from 'lucide-react';
+import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, updateBleNodeName, removeBleNode, fetchZones } from '../api';
 
 export default function BleMeshTab() {
   const [status, setStatus] = useState({ state: 'not_started' });
@@ -11,6 +11,8 @@ export default function BleMeshTab() {
   const [uuidInput, setUuidInput] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [editingNodeId, setEditingNodeId] = useState(null);
+  const [editingName, setEditingName] = useState('');
 
   const isNodeOnline = (node) => {
     if (node.status !== 'active' || !node.last_seen) return false;
@@ -128,6 +130,23 @@ export default function BleMeshTab() {
     } catch (err) {
       setError(err.message || 'Không thể xóa node.');
     } finally { setActionPending(''); }
+  };
+
+  const startRename = (node) => {
+    setEditingNodeId(node.id);
+    setEditingName(node.name || `node${node.id}`);
+  };
+
+  const handleSaveRename = async (nodeId) => {
+    if (!editingName.trim()) return;
+    try {
+      await updateBleNodeName(nodeId, editingName.trim());
+      await loadData(true);
+      setEditingNodeId(null);
+      setSuccessMsg(`Đã đổi tên node thành "${editingName.trim()}"`);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const getStateLabel = (state) => {
@@ -470,10 +489,48 @@ export default function BleMeshTab() {
                 {nodes.map((node) => (
                   <tr key={node.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-3 font-medium text-slate-800">
-                      <div className="flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-slate-400" />
-                        {node.name || `Node-${node.id}`}
-                      </div>
+                      {editingNodeId === node.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename(node.id);
+                              if (e.key === 'Escape') setEditingNodeId(null);
+                            }}
+                            className="px-2 py-1 text-sm border border-emerald-400 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 w-28 bg-white"
+                            placeholder="node1..."
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSaveRename(node.id)}
+                            className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                            title="Lưu"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setEditingNodeId(null)}
+                            className="p-1 text-slate-400 hover:bg-slate-100 rounded"
+                            title="Hủy"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 group">
+                          <Cpu className="w-4 h-4 text-slate-400" />
+                          <span className="font-semibold text-slate-800">{node.name || `Node-${node.id}`}</span>
+                          <button
+                            onClick={() => startRename(node)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-emerald-600 rounded transition-opacity"
+                            title="Đổi tên node (VD: node1, node2)"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 font-mono text-xs text-slate-600">{node.mesh_address || '---'}</td>
                     <td className="py-3">
