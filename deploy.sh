@@ -14,8 +14,8 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # --- Configuration ---
-PI_IP="${1:-${PI_IP:-"10.42.0.187"}}"
-PI_USER="${2:-${PI_USER:-"khanhpi"}}"
+PI_IP="${1:-${PI_IP:-"192.168.1.148"}}"
+PI_USER="${2:-${PI_USER:-"toan"}}"
 PI_DIR="${3:-${PI_DIR:-"/home/${PI_USER}/Smart_Plant"}}"
 PUSH_ONLY="${PUSH_ONLY:-1}"
 REMOTE_BUILD="${REMOTE_BUILD:-0}"
@@ -34,6 +34,7 @@ echo -e "${BLUE} 🌱 Smart Plant - Git Push Deploy Tool               ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 echo -e "Git remote  : ${YELLOW}${REPO_URL:-not configured}${NC}"
 echo -e "Git branch  : ${YELLOW}${GIT_BRANCH}${NC}"
+echo -e "Pi Target   : ${YELLOW}${PI_USER}@${PI_IP}:${PI_DIR}${NC}"
 echo -e "${BLUE}-----------------------------------------------------${NC}"
 
 if [ "${PUSH_ONLY}" = "1" ]; then
@@ -46,10 +47,11 @@ if [ "${PUSH_ONLY}" = "1" ]; then
     echo "  git add -A && git commit -m \"Update Smart Plant\""
     exit 1
   fi
-  echo -e "${GREEN}Đang push code lên GitHub, không cần kết nối tới Raspberry Pi...${NC}"
+  echo -e "${GREEN}Đang push code lên GitHub...${NC}"
   git -C "${SCRIPT_DIR}" push origin "${GIT_BRANCH}"
-  echo -e "${GREEN}Đã push thành công.${NC} Phía Pi chạy: git pull --ff-only origin ${GIT_BRANCH}"
-  echo -e "${BLUE}Sau khi build lỗi, lấy log bằng: pm2 logs --lines 100${NC}"
+  echo -e "${GREEN}Đã push thành công.${NC}"
+  echo -e "${BLUE}GitHub Webhook sẽ tự động thông báo và Pi sẽ cập nhật code mới ngay lập tức!${NC}"
+  echo -e "${BLUE}Theo dõi tiến trình trên Pi: pm2 logs smart-plant-webhook${NC}"
   exit 0
 fi
 

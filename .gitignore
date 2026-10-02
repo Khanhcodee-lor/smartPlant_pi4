@@ -1,4 +1,5 @@
 # === C++ Build ===
+build/
 ai_engine/build/
 ai_engine/build_aarch64/
 
@@ -10,8 +11,13 @@ server/db/smart_plant.db*
 *.db-wal
 *.db-shm
 
-# === Environment ===
+# === Environment & Credentials ===
 server/.env
+*.json
+!package*.json
+!tsconfig*.json
+!*manifest*.json
+ai_engine/config/
 
 # === IDE & OS ===
 .vscode/

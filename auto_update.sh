@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Smart Plant - Auto Update Script for Raspberry Pi 4
+# Kéo code mới nhất từ GitHub, tự động build lại và restart service PM2
+# ==============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+LOCK_FILE="/tmp/smartplant-update.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⏳ Quá trình cập nhật khác đang thực thi, bỏ qua lần này."
+    exit 0
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔍 Đang kiểm tra cập nhật từ GitHub (branch main)..."
+git fetch origin main > /dev/null 2>&1
+
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/main)
+
+if [ "$LOCAL" = "$REMOTE" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Đang ở commit mới nhất ($LOCAL). Không có thay đổi."
+    exit 0
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚀 Phát hiện commit mới trên GitHub!"
+echo "   Hiện tại: $LOCAL"
+echo "   Mới nhất: $REMOTE"
+
+CHANGED_FILES=$(git diff --name-only "$LOCAL" "$REMOTE")
+echo "📄 Các file thay đổi:"
+echo "$CHANGED_FILES" | sed 's/^/   - /'
+
+# Đồng bộ sạch code sang commit mới nhất
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📥 Đang cập nhật source code..."
+git reset --hard origin/main
+
+# 1. Nếu có thay đổi trong thư mục client (Frontend React)
+if echo "$CHANGED_FILES" | grep -q "^client/"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🎨 Phát hiện thay đổi Frontend, đang build lại..."
+    cd "$SCRIPT_DIR/client"
+    npm install --prefer-offline || npm install
+    npm run build
+    mkdir -p "$SCRIPT_DIR/server/public"
+    cp -r dist/* "$SCRIPT_DIR/server/public/"
+    cd "$SCRIPT_DIR"
+fi
+
+# 2. Nếu có thay đổi dependency của Server (Node.js)
+if echo "$CHANGED_FILES" | grep -q "^server/package\.json"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Cập nhật dependencies cho Node.js server..."
+    cd "$SCRIPT_DIR/server"
+    npm install
+    cd "$SCRIPT_DIR"
+fi
+
+# 3. Nếu có thay đổi trong thư mục ai_engine (C++)
+if echo "$CHANGED_FILES" | grep -q "^ai_engine/" && echo "$CHANGED_FILES" | grep -v "\.py$"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚙️ Phát hiện thay đổi C++, đang biên dịch lại..."
+    mkdir -p "$SCRIPT_DIR/ai_engine/build"
+    cd "$SCRIPT_DIR/ai_engine/build"
+    cmake ..
+    make -j$(nproc)
+    cd "$SCRIPT_DIR"
+fi
+
+# 4. Khởi động lại các dịch vụ PM2
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Khởi động lại các dịch vụ Smart Plant..."
+pm2 restart smart-plant-ble smart-plant-engine
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✨ Cập nhật hoàn tất thành công lên commit $REMOTE!"
