@@ -227,6 +227,8 @@ export async function assignNodeToZone(nodeId, zoneId) {
     console.error('[API] assignNodeToZone:', err.message);
     return null;
   }
+}
+
 /** Update a BLE node name — PATCH /api/ble/nodes/:id */
 export async function updateBleNodeName(nodeId, name) {
   const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}`, {
