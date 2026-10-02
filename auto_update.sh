@@ -78,8 +78,15 @@ fi
 
 # 4. Khởi động lại các dịch vụ PM2
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Khởi động lại các dịch vụ Smart Plant..."
-if echo "$CHANGED_FILES" | grep -q "^server/"; then
-    pm2 restart smart-plant-server
+if echo "$CHANGED_FILES" | grep -Eq "^server/|^auto_update\.sh$"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔎 Đang tìm đúng tiến trình Node server trong PM2..."
+    SERVER_PM2_ID="$(pm2 jlist | python3 -c 'import json, os, sys; target=os.path.realpath(sys.argv[1]); items=json.load(sys.stdin); match=next((p for p in items if os.path.realpath(p.get("pm2_env", {}).get("pm_exec_path", "")) == target or p.get("name") == "smart-plant-server"), None); print(match.get("pm_id", "") if match else "")' "$SCRIPT_DIR/server/server.js")"
+    if [ -n "$SERVER_PM2_ID" ]; then
+        pm2 restart "$SERVER_PM2_ID"
+    else
+        echo "⚠️ Chưa có tiến trình server trong PM2, đang khởi động bằng server.js..."
+        pm2 start "$SCRIPT_DIR/server/server.js" --name smart-plant-server --cwd "$SCRIPT_DIR/server"
+    fi
 fi
 if [ -x "$SCRIPT_DIR/ai_engine/.venv/bin/python" ]; then
     pm2 delete smart-plant-ble 2>/dev/null || true
