@@ -137,7 +137,7 @@ FIREBASE_STORAGE_BUCKET=pi4-iot-1b7bb.firebasestorage.app
 GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 ```
 
-Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`; thay đổi trong thư mục `server/` cũng khởi động lại tiến trình `smart-plant-server`. Dữ liệu được ghi như sau:
+Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`. Web server Node.js do `smart-plant-engine` khởi chạy và quản lý; script cập nhật sẽ xóa tiến trình PM2 `smart-plant-server` cũ nếu còn sót rồi restart engine. Không chạy thêm Node server riêng bằng PM2 vì sẽ tranh cổng 3000. Dữ liệu được ghi như sau:
 
 - Storage: `plant-captures/{captureId}/original.<ext>` cho ảnh camera và ảnh test từ thẻ nhớ; thêm `ai-annotated.jpg` khi AI phát hiện sâu bệnh.
 - Firestore: collection `plant_captures`, document ID là `captureId`. Các trường gồm `source` (`camera`, `pi_test_image` hoặc `sqlite_history`), `source_location`, `source_filename` và `source_path` với ảnh test, `status` (`detected`, `no_detection`, `analysis_failed`), `captured_at` (Firestore Timestamp), `captured_at_iso` (UTC), `capture_date` và `capture_time` (giờ Việt Nam), `zone_id`, `pest_type`, `confidence`, `severity`, `notes`, đường dẫn Storage và URL ảnh.
