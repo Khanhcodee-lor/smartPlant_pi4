@@ -730,6 +730,8 @@ router.get('/history', async (req, res) => {
         }
         if (captureId && firebaseItemsById.has(captureId)) {
           usedCaptureIds.add(captureId);
+          const item = firebaseItemsById.get(captureId);
+          item.sqlite_ids = [...(item.sqlite_ids || []), Number(row.id)];
           continue;
         }
         history.push(mapSqliteHistoryRow(row));
@@ -845,6 +847,72 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/pests/selected — Xóa các bản ghi được chọn trên SQLite và Firestore
+router.delete('/selected', async (req, res) => {
+  try {
+    const rawCaptureIds = Array.isArray(req.body?.capture_ids) ? req.body.capture_ids : [];
+    const rawSqliteIds = Array.isArray(req.body?.sqlite_ids) ? req.body.sqlite_ids : [];
+    const captureIds = [...new Set(rawCaptureIds
+      .filter(id => typeof id === 'string' && id.length > 0 && id.length <= 1500 && !id.includes('/')))];
+    const sqliteIds = [...new Set(rawSqliteIds
+      .map(Number)
+      .filter(id => Number.isSafeInteger(id) && id > 0))];
+
+    if (captureIds.length === 0 && sqliteIds.length === 0) {
+      return res.status(400).json({ error: 'Chưa có bản ghi hợp lệ để xóa' });
+    }
+    if (captureIds.length > 5000 || sqliteIds.length > 5000) {
+      return res.status(400).json({ error: 'Mỗi lần chỉ có thể xóa tối đa 5000 bản ghi' });
+    }
+
+    const db = getDb();
+    const firestore = captureIds.length > 0 ? getFirebaseServices().firestore : null;
+    let firebaseChanges = 0;
+
+    if (firestore) {
+      for (let offset = 0; offset < captureIds.length; offset += 400) {
+        const batch = firestore.batch();
+        for (const captureId of captureIds.slice(offset, offset + 400)) {
+          batch.delete(firestore.collection(CAPTURE_COLLECTION).doc(captureId));
+        }
+        await batch.commit();
+        firebaseChanges += Math.min(400, captureIds.length - offset);
+      }
+    }
+
+    let sqliteChanges = 0;
+    if (captureIds.length > 0 || sqliteIds.length > 0) {
+      const deleteSqliteRows = db.transaction(() => {
+        const chunkCount = Math.ceil(Math.max(captureIds.length, sqliteIds.length) / 400);
+        for (let index = 0; index < chunkCount; index += 1) {
+          const captureChunk = captureIds.slice(index * 400, (index + 1) * 400);
+          const sqliteChunk = sqliteIds.slice(index * 400, (index + 1) * 400);
+          const conditions = [];
+          if (captureChunk.length > 0) {
+            conditions.push(`firebase_capture_id IN (${captureChunk.map(() => '?').join(',')})`);
+          }
+          if (sqliteChunk.length > 0) {
+            conditions.push(`id IN (${sqliteChunk.map(() => '?').join(',')})`);
+          }
+          const result = db.prepare(`DELETE FROM pest_detections WHERE ${conditions.join(' OR ')}`)
+            .run(...captureChunk, ...sqliteChunk);
+          sqliteChanges += result.changes;
+        }
+      });
+      deleteSqliteRows();
+    }
+
+    res.json({
+      success: true,
+      message: 'Đã xóa các bản ghi đã chọn trên SQLite và Firestore',
+      changes: sqliteChanges,
+      firebase_changes: firebaseChanges
+    });
+  } catch (err) {
+    res.status(502).json({ error: `Không thể xóa các bản ghi đã chọn trên SQLite và Firebase: ${err.message}` });
   }
 });
 

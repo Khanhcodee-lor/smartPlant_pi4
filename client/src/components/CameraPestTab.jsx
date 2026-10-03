@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
-import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, captureAndAnalyze } from '../api';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, captureAndAnalyze } from '../api';
 import { Trash2 } from 'lucide-react';
 
 export default function CameraPestTab() {
   const [history, setHistory] = useState([]);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState(() => new Set());
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
   const [testImages, setTestImages] = useState([]);
@@ -120,10 +122,52 @@ export default function CameraPestTab() {
       const res = await clearPestHistory();
       if (res?.success) {
         setHistory([]);
+        setSelectedHistoryIds(new Set());
       } else {
         alert("Có lỗi xảy ra khi xóa lịch sử");
       }
     }
+  };
+
+  const toggleHistorySelection = (id) => {
+    setSelectedHistoryIds(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const visibleSelectedItems = history.filter(item => selectedHistoryIds.has(item.id));
+  const allHistorySelected = history.length > 0 && visibleSelectedItems.length === history.length;
+
+  const handleToggleSelectAll = () => {
+    setSelectedHistoryIds(current => {
+      const next = new Set(current);
+      if (allHistorySelected) history.forEach(item => next.delete(item.id));
+      else history.forEach(item => next.add(item.id));
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (visibleSelectedItems.length === 0 || deletingSelected) return;
+    if (!window.confirm(`Xóa ${visibleSelectedItems.length} bản ghi đã chọn khỏi SQLite và Firebase?`)) return;
+
+    setDeletingSelected(true);
+    const result = await deleteSelectedPestHistory(visibleSelectedItems);
+    if (result?.success) {
+      const deletedIds = new Set(visibleSelectedItems.map(item => item.id));
+      setHistory(current => current.filter(item => !deletedIds.has(item.id)));
+      setSelectedHistoryIds(current => {
+        const next = new Set(current);
+        deletedIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      alert(result?.error || 'Không thể xóa các bản ghi đã chọn. Vui lòng thử lại.');
+    }
+    setDeletingSelected(false);
   };
 
   const handleCaptureCamera = async () => {
@@ -404,10 +448,32 @@ export default function CameraPestTab() {
             <h2 className="text-xl font-bold text-slate-900">Lịch sử phân tích ảnh</h2>
             <p className="text-sm text-slate-500">Mọi ảnh chụp và ảnh tải lên đã được AI xử lý, kể cả ảnh không phát hiện bệnh</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
             <span className="text-xs font-medium text-slate-500">
               Tổng cộng: {history.length} lần phân tích
             </span>
+            {history.length > 0 && (
+              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allHistorySelected}
+                  onChange={handleToggleSelectAll}
+                  className="h-4 w-4 accent-emerald-600 cursor-pointer"
+                  aria-label="Chọn tất cả bản ghi"
+                />
+                <span>Chọn tất cả</span>
+              </label>
+            )}
+            {visibleSelectedItems.length > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deletingSelected}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white rounded-lg transition-colors text-xs font-semibold shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{deletingSelected ? 'Đang xóa...' : `Xóa đã chọn (${visibleSelectedItems.length})`}</span>
+              </button>
+            )}
             {history.length > 0 && (
               <button 
                 onClick={handleClearHistory}
@@ -453,6 +519,19 @@ export default function CameraPestTab() {
                     className="relative h-40 bg-slate-900 cursor-pointer overflow-hidden flex items-center justify-center"
                     onClick={() => hasImage && setSelectedImage(item.image_path)}
                   >
+                    <label
+                      className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white/95 shadow-sm cursor-pointer"
+                      onClick={event => event.stopPropagation()}
+                      title="Chọn bản ghi để xóa"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedHistoryIds.has(item.id)}
+                        onChange={() => toggleHistorySelection(item.id)}
+                        className="h-4 w-4 accent-emerald-600 cursor-pointer"
+                        aria-label={`Chọn ${resultTitle} để xóa`}
+                      />
+                    </label>
                     {hasImage ? (
                       <img 
                         src={item.image_path} 

@@ -75,6 +75,28 @@ export async function clearPestHistory() {
   }
 }
 
+/** Delete selected pest history items from SQLite and Firestore */
+export async function deleteSelectedPestHistory(items) {
+  try {
+    const res = await fetch(`${API_BASE}/pests/selected`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        capture_ids: items.map(item => item.firebase_capture_id ||
+          (String(item.id).startsWith('sqlite-') ? null : item.id)).filter(Boolean),
+        sqlite_ids: items.flatMap(item => [item.sqlite_id, ...(item.sqlite_ids || [])])
+          .filter(id => Number.isInteger(Number(id)) && Number(id) > 0)
+      })
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) return { ...result, success: false, error: result.error || `API Error: ${res.status}` };
+    return result;
+  } catch (err) {
+    console.error('[API] DELETE /pests/selected:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 /** Pest history (all) — GET /api/pests/history?days=30 */
 export async function fetchPestHistory(days = 30) {
   const result = await apiFetch(`/pests/history?days=${days}`);
