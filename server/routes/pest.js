@@ -292,18 +292,23 @@ async function syncSqliteRowToFirebase(db, firestore, row) {
 function mapFirebaseCapture(doc, zoneNames) {
   const record = doc.data();
   const capturedAt = getCaptureDate(record);
+  const status = record.status || (record.pest_type ? 'detected' : 'no_detection');
+  const confidence = record.confidence;
   return {
     id: doc.id,
     capture_id: record.capture_id || doc.id,
     firebase_capture_id: doc.id,
     source: record.source || null,
-    pest_type: record.pest_type || 'Không rõ bệnh',
-    confidence: Number.isFinite(Number(record.confidence)) ? Number(record.confidence) : 0,
+    status,
+    pest_type: record.pest_type || null,
+    confidence: confidence !== null && confidence !== undefined && confidence !== '' &&
+      Number.isFinite(Number(confidence)) ? Number(confidence) : null,
     image_path: record.annotated_image_url || record.original_image_url || record.image_path || null,
     zone_id: record.zone_id ?? null,
     zone_name: record.zone_name || zoneNames.get(String(record.zone_id ?? '')) || null,
-    severity: record.severity || 'low',
+    severity: record.severity || null,
     notes: record.notes || null,
+    analysis_error: record.analysis_error || null,
     timestamp: capturedAt?.toISOString() || null
   };
 }
@@ -314,6 +319,7 @@ function mapSqliteHistoryRow(row) {
     id: row.firebase_capture_id || `sqlite-${row.id}`,
     sqlite_id: Number(row.id),
     firebase_capture_id: row.firebase_capture_id || null,
+    status: 'detected',
     pest_type: row.pest_type,
     confidence: Number(row.confidence),
     image_path: row.image_path || null,
@@ -705,7 +711,7 @@ router.get('/history', async (req, res) => {
       const snapshot = await firestore.collection(CAPTURE_COLLECTION)
         .where('captured_at', '>=', Timestamp.fromDate(cutoff))
         .get();
-      const firebaseDocs = snapshot.docs.filter(doc => doc.data().status === 'detected');
+      const firebaseDocs = snapshot.docs;
       const firebaseItems = firebaseDocs
         .map(doc => mapFirebaseCapture(doc, zoneNames))
         .filter(item => {
@@ -848,7 +854,7 @@ router.delete('/all', async (req, res) => {
     const db = getDb();
     const { firestore } = getFirebaseServices();
     const collection = firestore.collection(CAPTURE_COLLECTION);
-    const snapshot = await collection.where('status', '==', 'detected').get();
+    const snapshot = await collection.get();
 
     for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
       const batch = firestore.batch();

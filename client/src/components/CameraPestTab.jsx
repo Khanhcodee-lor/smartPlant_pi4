@@ -167,7 +167,9 @@ export default function CameraPestTab() {
   };
 
   const formatTime = (timestamp) => {
+    if (!timestamp) return 'Thời gian không rõ';
     const d = new Date(timestamp);
+    if (Number.isNaN(d.getTime())) return 'Thời gian không rõ';
     return d.toLocaleString('vi-VN', { 
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit' 
@@ -399,12 +401,12 @@ export default function CameraPestTab() {
       <section>
         <div className="flex items-center justify-between mb-4 px-2">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Lịch sử phát hiện bệnh hại</h2>
-            <p className="text-sm text-slate-500">Các kết quả quét từ camera và ảnh test của hệ thống AI</p>
+            <h2 className="text-xl font-bold text-slate-900">Lịch sử phân tích ảnh</h2>
+            <p className="text-sm text-slate-500">Mọi ảnh chụp và ảnh tải lên đã được AI xử lý, kể cả ảnh không phát hiện bệnh</p>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-xs font-medium text-slate-500">
-              Tổng cộng: {history.length} bản ghi
+              Tổng cộng: {history.length} lần phân tích
             </span>
             {history.length > 0 && (
               <button 
@@ -425,13 +427,24 @@ export default function CameraPestTab() {
         ) : history.length === 0 ? (
           <div className="glass-panel p-8 text-center text-slate-500">
             <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2 opacity-80" />
-            <p className="font-semibold text-slate-700">Chưa có bản ghi sâu bệnh nào!</p>
-            <p className="text-xs text-slate-400 mt-1">Hệ thống đang hoạt động và sẵn sàng quét khi có cây bị bệnh.</p>
+            <p className="font-semibold text-slate-700">Chưa có ảnh nào được phân tích</p>
+            <p className="text-xs text-slate-400 mt-1">Ảnh chụp từ camera và ảnh tải lên sẽ xuất hiện tại đây sau khi xử lý.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {history.map((item) => {
+              const isDetected = item.status === 'detected' || (!item.status && !!item.pest_type);
+              const isAnalysisFailed = item.status === 'analysis_failed';
               const sev = severityConfig[item.severity] || severityConfig.low;
+              const badge = isDetected
+                ? sev
+                : isAnalysisFailed
+                  ? { label: 'Lỗi phân tích', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' }
+                  : { label: 'Không phát hiện', bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' };
+              const confidence = item.confidence !== null && item.confidence !== undefined &&
+                Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null;
+              const resultTitle = item.pest_type ||
+                (isAnalysisFailed ? 'Không phân tích được ảnh' : 'Không phát hiện sâu bệnh');
               const hasImage = !!item.image_path;
 
               return (
@@ -443,7 +456,7 @@ export default function CameraPestTab() {
                     {hasImage ? (
                       <img 
                         src={item.image_path} 
-                        alt={item.pest_type}
+                        alt={resultTitle}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
                     ) : (
@@ -454,22 +467,24 @@ export default function CameraPestTab() {
                     )}
                     
                     <div className="absolute top-2 right-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shadow-sm ${sev.bg} ${sev.text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${sev.dot}`} />
-                        {sev.label}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shadow-sm ${badge.bg} ${badge.text}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                        {badge.label}
                       </span>
                     </div>
                   </div>
 
                   <div className="p-3">
-                    <h3 className="text-sm font-bold text-slate-900">{item.pest_type}</h3>
+                    <h3 className="text-sm font-bold text-slate-900">{resultTitle}</h3>
                     <div className="flex items-center justify-between mt-1 text-xs text-slate-500">
-                      <span>{item.zone_name || 'Khu vực không rõ'}</span>
-                      <span className="font-semibold text-emerald-600">{(item.confidence * 100).toFixed(0)}%</span>
+                      <span>{item.zone_name || (item.source === 'camera' ? 'Camera' : item.source ? 'Ảnh tải lên' : 'Khu vực không rõ')}</span>
+                      {confidence !== null && (
+                        <span className="font-semibold text-emerald-600">{(confidence * 100).toFixed(0)}%</span>
+                      )}
                     </div>
-                    {item.notes && (
+                    {(item.notes || item.analysis_error) && (
                       <p className="text-[11px] text-slate-600 mt-1.5 line-clamp-2 bg-slate-50 p-1.5 rounded border border-slate-200">
-                        {item.notes}
+                        {item.notes || item.analysis_error}
                       </p>
                     )}
                     <p className="text-[10px] text-slate-400 mt-2">{formatTime(item.timestamp)}</p>
