@@ -694,7 +694,7 @@ router.get('/history', async (req, res) => {
     );
 
     try {
-      const { firestore } = getFirebaseServices();
+      const { firestore, Timestamp } = getFirebaseServices();
       let syncedSqliteRows = 0;
       try {
         syncedSqliteRows = await syncPendingSqliteHistory(db, firestore);
@@ -703,9 +703,9 @@ router.get('/history', async (req, res) => {
       }
 
       const snapshot = await firestore.collection(CAPTURE_COLLECTION)
-        .where('status', '==', 'detected')
+        .where('captured_at', '>=', Timestamp.fromDate(cutoff))
         .get();
-      const firebaseDocs = snapshot.docs;
+      const firebaseDocs = snapshot.docs.filter(doc => doc.data().status === 'detected');
       const firebaseItems = firebaseDocs
         .map(doc => mapFirebaseCapture(doc, zoneNames))
         .filter(item => {

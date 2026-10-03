@@ -21,7 +21,7 @@ import {
   fetchPestStats,
 } from './api';
 
-const REFRESH_INTERVAL = 5_000; // Refresh live data every 5 seconds
+const REFRESH_INTERVAL = 15_000; // Refresh dashboard data every 15 seconds
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -64,9 +64,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (activeTab !== 'dashboard') return undefined;
     const interval = setInterval(loadAllData, REFRESH_INTERVAL);
     return () => clearInterval(interval);
-  }, [loadAllData]);
+  }, [activeTab, loadAllData]);
 
   useEffect(() => { if (activeTab === 'dashboard') loadAllData(); }, [activeTab, loadAllData]);
 

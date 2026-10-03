@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { cert, getApps, initializeApp } = require('firebase-admin/app');
-const { FieldValue, getFirestore } = require('firebase-admin/firestore');
+const { FieldValue, Timestamp, getFirestore } = require('firebase-admin/firestore');
 const { getDownloadURL, getStorage } = require('firebase-admin/storage');
 
 const APP_NAME = 'smart-plant-firebase';
@@ -38,6 +38,7 @@ function getFirebaseServices() {
     firestore: getFirestore(app),
     bucket: getStorage(app).bucket(storageBucket),
     FieldValue,
+    Timestamp,
     getDownloadURL
   };
 }

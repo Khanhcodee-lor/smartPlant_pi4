@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, captureAndAnalyze } from '../api';
 import { Trash2 } from 'lucide-react';
@@ -14,45 +14,51 @@ export default function CameraPestTab() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [captureError, setCaptureError] = useState(null);
-  const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [liveRefreshKey, setLiveRefreshKey] = useState(Date.now());
   const [isLiveStreamMode, setIsLiveStreamMode] = useState(false);
   const fileInputRef = useRef(null);
+  const historyRefreshInProgress = useRef(false);
+
+  const fetchHistoryWithoutOverlap = useCallback(async () => {
+    if (historyRefreshInProgress.current) return null;
+    historyRefreshInProgress.current = true;
+    try {
+      return await fetchPestHistory(30);
+    } finally {
+      historyRefreshInProgress.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       const [histData, testData] = await Promise.all([
-        fetchPestHistory(30),
+        fetchHistoryWithoutOverlap(),
         fetchTestImages()
       ]);
-      setHistory(histData || []);
+      if (Array.isArray(histData)) setHistory(histData);
       setTestImages(testData || []);
       setLoading(false);
     }
     loadData();
-  }, [refreshKey]);
+  }, [fetchHistoryWithoutOverlap]);
 
-  // Auto-refresh lịch sử và ảnh live mỗi 10 giây
+  // Refresh history every 30 seconds while visible; detections refresh it immediately.
   useEffect(() => {
     const interval = setInterval(async () => {
-      const histData = await fetchPestHistory(30);
-      if (histData) {
-        setHistory(histData);
-      }
-      // Cũng refresh ảnh live detection nếu đang ở chế độ camera
-      if (!activeTestImage) {
-        setRefreshKey(Date.now());
-      }
-    }, 10000);
+      if (document.visibilityState !== 'visible') return;
+      const histData = await fetchHistoryWithoutOverlap();
+      if (Array.isArray(histData)) setHistory(histData);
+      if (!activeTestImage) setLiveRefreshKey(Date.now());
+    }, 30000);
     return () => clearInterval(interval);
-  }, [activeTestImage]);
+  }, [activeTestImage, fetchHistoryWithoutOverlap]);
 
-  // Hàm tiện ích: refresh lịch sử sau khi phân tích (có delay nhỏ để DB commit)
+  // API ghi cả SQLite và Firestore trước khi trả kết quả nên tải lại ngay.
   const refreshHistoryAfterAnalysis = async () => {
-    await new Promise(r => setTimeout(r, 500)); // chờ DB ghi xong
-    const updatedHist = await fetchPestHistory(30);
-    setHistory(updatedHist || []);
-    setRefreshKey(Date.now());
+    const updatedHist = await fetchHistoryWithoutOverlap();
+    if (Array.isArray(updatedHist)) setHistory(updatedHist);
+    setLiveRefreshKey(Date.now());
   };
 
   // Kích hoạt AI phân tích ảnh ngay lập tức
@@ -316,7 +322,7 @@ export default function CameraPestTab() {
             />
           ) : (
             <img 
-              src={activeTestImage || `/latest_detection.jpg?t=${refreshKey}`} 
+              src={activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`} 
               alt="AI Detection Feed"
               onError={(e) => {
                 if (!activeTestImage) {
@@ -378,7 +384,7 @@ export default function CameraPestTab() {
                 </button>
               )}
               <button 
-                onClick={() => setSelectedImage(activeTestImage || `/latest_detection.jpg?t=${refreshKey}`)}
+                onClick={() => setSelectedImage(activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`)}
                 className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors text-white"
                 title="Phóng to ảnh"
               >
