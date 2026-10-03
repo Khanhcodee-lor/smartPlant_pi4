@@ -146,6 +146,185 @@ function getCaptureTimeFields(date) {
   };
 }
 
+const CAPTURE_COLLECTION = 'plant_captures';
+
+function parseDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value.toDate === 'function') {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const normalized = typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getCaptureDate(record) {
+  return parseDate(record.captured_at_iso || record.timestamp || record.captured_at);
+}
+
+function comparableImagePath(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function findMatchingFirebaseCapture(row, firebaseDocs, usedCaptureIds = new Set()) {
+  const imagePath = comparableImagePath(row.image_path);
+  if (imagePath) {
+    const imageMatch = firebaseDocs.find(doc => {
+      if (usedCaptureIds.has(doc.id)) return false;
+      const record = doc.data();
+      if (record.status !== 'detected') return false;
+      return [record.image_path, record.original_image_url, record.annotated_image_url]
+        .some(candidate => comparableImagePath(candidate) === imagePath);
+    });
+    if (imageMatch) return imageMatch;
+  }
+
+  const rowDate = parseDate(row.timestamp);
+  if (!rowDate) return null;
+  const pestType = String(row.pest_type || '').trim().toLowerCase();
+  const confidence = Number(row.confidence);
+  const zoneId = row.zone_id == null ? '' : String(row.zone_id);
+  let closestMatch = null;
+  let closestDelta = Infinity;
+
+  for (const doc of firebaseDocs) {
+    if (usedCaptureIds.has(doc.id)) continue;
+    const record = doc.data();
+    if (record.status !== 'detected' || String(record.pest_type || '').trim().toLowerCase() !== pestType) continue;
+    if (zoneId && String(record.zone_id ?? '') !== zoneId) continue;
+    if (row.severity && record.severity && String(record.severity) !== String(row.severity)) continue;
+    if (Number.isFinite(confidence) && Number.isFinite(Number(record.confidence)) &&
+        Math.abs(Number(record.confidence) - confidence) > 0.001) continue;
+
+    const captureDate = getCaptureDate(record);
+    if (!captureDate) continue;
+    const delta = Math.abs(captureDate.getTime() - rowDate.getTime());
+    if (delta <= 120000 && delta < closestDelta) {
+      closestMatch = doc;
+      closestDelta = delta;
+    }
+  }
+
+  return closestMatch;
+}
+
+function sqliteRowToFirebaseCapture(row, captureId) {
+  const capturedAt = parseDate(row.timestamp) || new Date();
+  return {
+    capture_id: captureId,
+    source: 'sqlite_history',
+    status: 'detected',
+    captured_at: capturedAt,
+    captured_at_iso: capturedAt.toISOString(),
+    ...getCaptureTimeFields(capturedAt),
+    zone_id: row.zone_id == null ? null : Number(row.zone_id),
+    zone_name: row.zone_name || null,
+    pest_type: row.pest_type || null,
+    confidence: Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : null,
+    severity: row.severity || null,
+    notes: row.notes || null,
+    image_path: row.image_path || null,
+    original_image_url: row.image_path || null,
+    sqlite_detection_id: Number(row.id)
+  };
+}
+
+async function syncPendingSqliteHistory(db, firestore) {
+  const pendingRows = db.prepare(`
+    SELECT p.*, z.name AS zone_name
+    FROM pest_detections p
+    LEFT JOIN zones z ON p.zone_id = z.id
+    WHERE p.firebase_capture_id IS NULL
+    ORDER BY p.id ASC
+  `).all();
+  if (!pendingRows.length) return 0;
+
+  const collection = firestore.collection(CAPTURE_COLLECTION);
+  const existingSnapshot = await collection.where('status', '==', 'detected').get();
+  const existingDocs = existingSnapshot.docs;
+  const usedCaptureIds = new Set();
+  const updateLocalLink = db.prepare(`
+    UPDATE pest_detections SET firebase_capture_id = ?
+    WHERE id = ? AND firebase_capture_id IS NULL
+  `);
+
+  for (let offset = 0; offset < pendingRows.length; offset += 400) {
+    const rows = pendingRows.slice(offset, offset + 400);
+    const batch = firestore.batch();
+    const links = [];
+    let batchWriteCount = 0;
+
+    for (const row of rows) {
+      const matchingDoc = findMatchingFirebaseCapture(row, existingDocs, usedCaptureIds);
+      const captureId = matchingDoc?.id || `sqlite-history-${row.id}`;
+      if (matchingDoc) {
+        usedCaptureIds.add(matchingDoc.id);
+      } else {
+        batch.set(collection.doc(captureId), sqliteRowToFirebaseCapture(row, captureId), { merge: true });
+        batchWriteCount += 1;
+      }
+      links.push({ captureId, sqliteId: row.id });
+    }
+
+    if (batchWriteCount) await batch.commit();
+    for (const link of links) updateLocalLink.run(link.captureId, link.sqliteId);
+  }
+
+  return pendingRows.length;
+}
+
+async function syncSqliteRowToFirebase(db, firestore, row) {
+  const captureId = row.firebase_capture_id || `sqlite-history-${row.id}`;
+  await firestore.collection(CAPTURE_COLLECTION).doc(captureId)
+    .set(sqliteRowToFirebaseCapture(row, captureId), { merge: true });
+  db.prepare(`
+    UPDATE pest_detections SET firebase_capture_id = ?
+    WHERE id = ? AND firebase_capture_id IS NULL
+  `).run(captureId, row.id);
+  return captureId;
+}
+
+function mapFirebaseCapture(doc, zoneNames) {
+  const record = doc.data();
+  const capturedAt = getCaptureDate(record);
+  return {
+    id: doc.id,
+    capture_id: record.capture_id || doc.id,
+    firebase_capture_id: doc.id,
+    source: record.source || null,
+    pest_type: record.pest_type || 'Không rõ bệnh',
+    confidence: Number.isFinite(Number(record.confidence)) ? Number(record.confidence) : 0,
+    image_path: record.annotated_image_url || record.original_image_url || record.image_path || null,
+    zone_id: record.zone_id ?? null,
+    zone_name: record.zone_name || zoneNames.get(String(record.zone_id ?? '')) || null,
+    severity: record.severity || 'low',
+    notes: record.notes || null,
+    timestamp: capturedAt?.toISOString() || null
+  };
+}
+
+function mapSqliteHistoryRow(row) {
+  const capturedAt = parseDate(row.timestamp);
+  return {
+    id: row.firebase_capture_id || `sqlite-${row.id}`,
+    sqlite_id: Number(row.id),
+    firebase_capture_id: row.firebase_capture_id || null,
+    pest_type: row.pest_type,
+    confidence: Number(row.confidence),
+    image_path: row.image_path || null,
+    zone_id: row.zone_id ?? null,
+    zone_name: row.zone_name || null,
+    severity: row.severity || 'low',
+    notes: row.notes || null,
+    timestamp: capturedAt?.toISOString() || row.timestamp
+  };
+}
+
 async function uploadCaptureImage(bucket, getDownloadURL, captureId, filename, bytes, contentType = 'image/jpeg') {
   const storagePath = `plant-captures/${captureId}/${filename}`;
   const file = bucket.file(storagePath);
@@ -269,15 +448,17 @@ router.post('/analyze', async (req, res) => {
       try {
         const db = getDb();
         db.prepare(`
-          INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO pest_detections
+            (pest_type, confidence, image_path, zone_id, severity, notes, firebase_capture_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
           result.pest_type,
           saved.confidence ?? 0.9,
           saved.annotatedImage?.downloadUrl || result.image_path || saved.originalImage.downloadUrl,
           Number(result.zone_id || zoneId),
           result.severity || 'medium',
-          result.notes || 'Phân tích ảnh test từ thẻ nhớ Pi'
+          result.notes || 'Phân tích ảnh test từ thẻ nhớ Pi',
+          saved.captureId
         );
       } catch (error) {
         localHistoryError = error.message;
@@ -412,15 +593,17 @@ router.post('/capture-analyze', async (req, res) => {
     if (hasPestDetection(result)) {
       const db = getDb();
       db.prepare(`
-        INSERT INTO pest_detections (pest_type, confidence, image_path, zone_id, severity, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO pest_detections
+          (pest_type, confidence, image_path, zone_id, severity, notes, firebase_capture_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         result.pest_type,
         confidence ?? 0.9,
         annotatedImage?.downloadUrl || result.image_path || originalImage.downloadUrl,
         captureRecord.zone_id,
         result.severity || 'medium',
-        result.notes || 'Chụp trực tiếp từ camera và phân tích'
+        result.notes || 'Chụp trực tiếp từ camera và phân tích',
+        captureId
       );
     }
 
@@ -490,21 +673,80 @@ router.get('/latest', (req, res) => {
   }
 });
 
-// GET /api/pests/history?days=7 — Lịch sử phát hiện sâu bệnh
-router.get('/history', (req, res) => {
+// GET /api/pests/history?days=7 — Hợp nhất SQLite và Firestore, đồng thời
+// đồng bộ các bản ghi SQLite cũ chưa có liên kết Firebase.
+router.get('/history', async (req, res) => {
   try {
     const db = getDb();
-    const days = parseInt(req.query.days) || 7;
-
-    const rows = db.prepare(`
-      SELECT p.*, z.name as zone_name
+    const parsedDays = parseInt(req.query.days, 10) || 7;
+    const days = Math.max(1, Math.min(parsedDays, 3650));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const localRows = db.prepare(`
+      SELECT p.*, z.name AS zone_name
       FROM pest_detections p
       LEFT JOIN zones z ON p.zone_id = z.id
       WHERE p.timestamp >= datetime('now', ?)
       ORDER BY p.timestamp DESC
     `).all(`-${days} days`);
 
-    res.json({ data: rows, count: rows.length });
+    const zoneNames = new Map(
+      db.prepare('SELECT id, name FROM zones').all().map(zone => [String(zone.id), zone.name])
+    );
+
+    try {
+      const { firestore } = getFirebaseServices();
+      let syncedSqliteRows = 0;
+      try {
+        syncedSqliteRows = await syncPendingSqliteHistory(db, firestore);
+      } catch (syncError) {
+        console.error('[Pest History] Không đồng bộ được SQLite lên Firestore:', syncError.message);
+      }
+
+      const snapshot = await firestore.collection(CAPTURE_COLLECTION)
+        .where('status', '==', 'detected')
+        .get();
+      const firebaseDocs = snapshot.docs;
+      const firebaseItems = firebaseDocs
+        .map(doc => mapFirebaseCapture(doc, zoneNames))
+        .filter(item => {
+          const date = parseDate(item.timestamp);
+          return date && date >= cutoff;
+        });
+      const firebaseItemsById = new Map(firebaseItems.map(item => [item.firebase_capture_id, item]));
+      const usedCaptureIds = new Set();
+      const history = [...firebaseItems];
+
+      for (const row of localRows) {
+        let captureId = row.firebase_capture_id || null;
+        if (!captureId) {
+          const matchingDoc = findMatchingFirebaseCapture(row, firebaseDocs, usedCaptureIds);
+          captureId = matchingDoc?.id || null;
+        }
+        if (captureId && firebaseItemsById.has(captureId)) {
+          usedCaptureIds.add(captureId);
+          continue;
+        }
+        history.push(mapSqliteHistoryRow(row));
+      }
+
+      history.sort((left, right) => (parseDate(right.timestamp)?.getTime() || 0) -
+        (parseDate(left.timestamp)?.getTime() || 0));
+      return res.json({
+        data: history,
+        count: history.length,
+        sources: { sqlite: true, firebase: true },
+        sqlite_rows_synced: syncedSqliteRows
+      });
+    } catch (firebaseError) {
+      console.error('[Pest History] Firestore chưa khả dụng, trả lịch sử SQLite:', firebaseError.message);
+      const history = localRows.map(mapSqliteHistoryRow);
+      return res.json({
+        data: history,
+        count: history.length,
+        sources: { sqlite: true, firebase: false },
+        firebase_error: firebaseError.message
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -549,7 +791,7 @@ router.get('/stats', (req, res) => {
 });
 
 // POST /api/pests — Ghi kết quả phát hiện sâu bệnh mới (từ AI engine)
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const db = getDb();
     const { pest_type, confidence, image_path, zone_id, severity, notes } = req.body;
@@ -572,9 +814,28 @@ router.post('/', (req, res) => {
       notes || null
     );
 
+    const row = db.prepare(`
+      SELECT p.*, z.name AS zone_name
+      FROM pest_detections p
+      LEFT JOIN zones z ON p.zone_id = z.id
+      WHERE p.id = ?
+    `).get(result.lastInsertRowid);
+
+    let firebaseCaptureId = null;
+    let firebaseSyncError = null;
+    try {
+      const { firestore } = getFirebaseServices();
+      firebaseCaptureId = await syncSqliteRowToFirebase(db, firestore, row);
+    } catch (error) {
+      firebaseSyncError = error.message;
+      console.error('[Pest Detection] SQLite lưu được nhưng Firebase đồng bộ lỗi:', firebaseSyncError);
+    }
+
     res.status(201).json({
       message: 'Pest detection recorded',
-      id: result.lastInsertRowid
+      id: result.lastInsertRowid,
+      firebase_capture_id: firebaseCaptureId,
+      firebase_sync_error: firebaseSyncError
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -582,13 +843,28 @@ router.post('/', (req, res) => {
 });
 
 // DELETE /api/pests/all — Xóa toàn bộ lịch sử phát hiện sâu bệnh
-router.delete('/all', (req, res) => {
+router.delete('/all', async (req, res) => {
   try {
     const db = getDb();
+    const { firestore } = getFirebaseServices();
+    const collection = firestore.collection(CAPTURE_COLLECTION);
+    const snapshot = await collection.where('status', '==', 'detected').get();
+
+    for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+      const batch = firestore.batch();
+      for (const doc of snapshot.docs.slice(offset, offset + 400)) batch.delete(doc.ref);
+      await batch.commit();
+    }
+
     const result = db.prepare('DELETE FROM pest_detections').run();
-    res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử phát hiện', changes: result.changes });
+    res.json({
+      success: true,
+      message: 'Đã xóa lịch sử phát hiện trên SQLite và Firestore',
+      changes: result.changes,
+      firebase_changes: snapshot.size
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(502).json({ error: `Không thể đồng bộ xóa lịch sử với Firebase: ${err.message}` });
   }
 });
 

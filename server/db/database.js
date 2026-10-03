@@ -52,6 +52,13 @@ function initDatabase() {
     )
   `);
 
+  // Link local detections to their Firestore capture so both sources can be
+  // merged without showing the same detection twice.
+  const pestColumns = database.pragma('table_info(pest_detections)');
+  if (!pestColumns.some(column => column.name === 'firebase_capture_id')) {
+    database.exec('ALTER TABLE pest_detections ADD COLUMN firebase_capture_id TEXT');
+  }
+
   // Zones table
   database.exec(`
     CREATE TABLE IF NOT EXISTS zones (
@@ -87,6 +94,9 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_sensor_zone ON sensor_data(zone_id);
     CREATE INDEX IF NOT EXISTS idx_pest_timestamp ON pest_detections(timestamp);
     CREATE INDEX IF NOT EXISTS idx_pest_zone ON pest_detections(zone_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pest_firebase_capture_id
+      ON pest_detections(firebase_capture_id)
+      WHERE firebase_capture_id IS NOT NULL;
   `);
 
   // Zones are created dynamically when ESP32 nodes join the BLE Mesh network.
