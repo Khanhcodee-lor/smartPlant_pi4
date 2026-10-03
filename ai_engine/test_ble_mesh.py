@@ -81,6 +81,66 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(node, ('active', '0x0002'))
         self.assertEqual(reading, (27.8, 65.75, 415.0, 45.65))
 
+    def test_slow_firebase_does_not_block_sensor_event_processing(self):
+        started = threading.Event()
+        release = threading.Event()
+        submitted = threading.Event()
+
+        class SlowFirebase:
+            status = 'ready'
+            error = None
+            database = object()
+            root = object()
+
+            def __init__(self):
+                self.writes = []
+
+            def new_history_key(self, mesh_address, node_name=None):
+                return f'{mesh_address}-{len(self.writes)}'
+
+            def write_sensor(self, mesh_address, zone_id, values, node_name=None,
+                             zone_name=None, history_key=None):
+                if not self.writes:
+                    started.set()
+                    release.wait(3)
+                self.writes.append((mesh_address, dict(values), history_key))
+                self.status = 'connected'
+                return True
+
+        self.gateway.firebase = SlowFirebase()
+        self.gateway.handle_event({
+            'event': 'node', 'uuid': UUID, 'address': '0x0002',
+            'provisioned': True, 'appkey': True, 'bind': True, 'publication': True,
+        })
+
+        def submit_sensor_events():
+            for temperature in (27.8, 27.9):
+                self.gateway.handle_event({
+                    'event': 'sensor', 'address': '0x0002',
+                    'temperature': temperature, 'humidity': 65.75,
+                    'light': 415, 'soil_moisture': 45.65,
+                })
+            submitted.set()
+
+        submitter = threading.Thread(target=submit_sensor_events)
+        submitter.start()
+        try:
+            self.assertTrue(started.wait(1), 'Firebase writer did not start')
+            self.assertTrue(submitted.wait(0.5), 'sensor handling waited for Firebase')
+            with sqlite3.connect(self.db_path) as conn:
+                self.assertEqual(conn.execute('SELECT COUNT(*) FROM sensor_data').fetchone()[0], 2)
+        finally:
+            release.set()
+            submitter.join(2)
+            deadline = time.monotonic() + 2
+            while self.gateway.firebase_queue.unfinished_tasks and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.gateway.stop()
+
+        self.assertFalse(submitter.is_alive())
+        self.assertEqual(self.gateway.firebase_queue.unfinished_tasks, 0)
+        self.assertEqual(len(self.gateway.firebase.writes), 2)
+
     def test_incomplete_node_cannot_write_sensor_data(self):
         self.gateway.handle_event({
             'event': 'node', 'uuid': UUID, 'address': 2,

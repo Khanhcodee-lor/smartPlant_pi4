@@ -51,7 +51,7 @@ if echo "$CHANGED_FILES" | grep -q "^client/"; then
 fi
 
 # 2. Nếu có thay đổi dependency của Server (Node.js)
-if echo "$CHANGED_FILES" | grep -q "^server/package\.json"; then
+if echo "$CHANGED_FILES" | grep -Eq "^server/package(-lock)?\.json$"; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Cập nhật dependencies cho Node.js server..."
     cd "$SCRIPT_DIR/server"
     npm install

@@ -11,17 +11,25 @@ ESP32 sensor nodes <-- BLE Mesh --> ESP32 Gateway <-- USB serial --> Pi 4 <-- HT
 
 ### Đẩy số đo node BLE lên Firebase Realtime Database
 
-Gateway ghi mỗi bản tin sensor vào SQLite như trước, đồng thời cập nhật RTDB
-ngay sau khi nhận bản tin từ node. Cấu trúc dữ liệu:
+Gateway ghi mọi bản tin sensor vào SQLite, sau đó đưa bản sao Firebase vào một
+hàng đợi nền để việc ghi mạng không chặn luồng đọc USB/Mesh. Dữ liệu RTDB được
+chia theo tên node đã chuẩn hóa:
 
 ```text
-/ble_sensors/0x0002/latest
-/ble_sensors/0x0002/history/<push-id>
+/node1/sensor
+/node1/history/<push-id>
 ```
 
-`latest` luôn là số đo mới nhất của node; `history` lưu các lần đo. Mỗi object
-có `temperature`, `humidity`, `light`, `soil_moisture`, `node_address`,
-`zone_id` và timestamp do Firebase tạo.
+`sensor` luôn giữ số đo mới nhất; `history` lưu các lần đo và được giới hạn bởi
+`FIREBASE_MAX_HISTORY` (mặc định 100). Mỗi object có `temperature`, `humidity`,
+`light`, `soil_moisture` và timestamp do Firebase tạo. Metadata của node như
+`mesh_address`, `node_name`, `zone_id` và `zone_name` nằm trong `sensor`.
+
+Gateway thử ghi lại tối đa ba lần khi Firebase tạm lỗi. Hàng đợi giữ tối đa 128
+bản tin; nếu Firebase chậm lâu hơn khả năng đệm, gateway bỏ bản chờ cũ nhất để
+ưu tiên số đo mới. Mọi số đo vẫn được lưu trong SQLite. Trạng thái
+`firebase_pending`, `firebase_queue_dropped` và `firebase_last_write_failed`
+có trong `/api/ble/status` để kiểm tra độ trễ hoặc bản tin Firebase bị bỏ.
 
 Trên Pi, giữ service account tại
 `ai_engine/config/pi4-iot.json` (không commit khóa lên GitHub). Cài SDK vào

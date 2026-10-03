@@ -6,6 +6,7 @@ import glob
 import json
 import os
 from pathlib import Path
+import queue
 import select
 import signal
 import socket
@@ -43,6 +44,9 @@ REQUIRED_FLAGS = ('provisioned', 'appkey', 'bind', 'publication')
 MAX_LINE = 4096
 HANDSHAKE_TIMEOUT = 20
 STATUS_INTERVAL = 2
+FIREBASE_QUEUE_SIZE = 128
+FIREBASE_WRITE_ATTEMPTS = 3
+FIREBASE_RETRY_DELAY = 0.5
 FIREBASE_DATABASE_URL = os.environ.get(
     'FIREBASE_DATABASE_URL',
     'https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app',
@@ -91,6 +95,26 @@ class FirebaseRTDB:
             self.error = str(error)
             self.status = 'error'
 
+    @staticmethod
+    def _node_key(mesh_address, node_name):
+        import re
+        raw_name = str(node_name or '').strip()
+        clean_name = re.sub(r'[.$#\[\]/]', '', raw_name)
+        if not clean_name:
+            clean_name = f"node_{mesh_address.lower().replace('0x', '')}"
+
+        # Chuẩn hóa tên node: ví dụ "Node 1" -> "node1".
+        match = re.match(r'^(node)[\s\-_]*(\d+)$', clean_name, re.IGNORECASE)
+        if match:
+            return f"{match.group(1).lower()}{match.group(2)}"
+        return re.sub(r'\s+', '_', clean_name).lower()
+
+    def new_history_key(self, mesh_address, node_name=None):
+        if not self.database or not getattr(self, 'root', None):
+            return None
+        firebase_key = self._node_key(mesh_address, node_name)
+        return self.root.child(f'{firebase_key}/history').push().key
+
     def _prune_history(self, firebase_key, max_entries=100):
         """Giữ tối đa max_entries bản ghi mới nhất, xóa các bản ghi cũ hơn."""
         if not self.database or not getattr(self, 'root', None) or max_entries <= 0:
@@ -107,22 +131,13 @@ class FirebaseRTDB:
         except Exception:
             pass
 
-    def write_sensor(self, mesh_address, zone_id, values, node_name=None, zone_name=None):
+    def write_sensor(self, mesh_address, zone_id, values, node_name=None,
+                     zone_name=None, history_key=None):
         if self.database is None or not getattr(self, 'root', None):
             return False
         try:
-            import re
             raw_name = str(node_name or '').strip()
-            clean_name = re.sub(r'[\.\$#\[\]/]', '', raw_name)
-            if not clean_name:
-                clean_name = f"node_{mesh_address.lower().replace('0x', '')}"
-
-            # Chuẩn hóa tên node: ví dụ "Node 1" -> "node1", "Node-1" -> "node1", "node 2" -> "node2"
-            match = re.match(r'^(node)[\s\-_]*(\d+)$', clean_name, re.IGNORECASE)
-            if match:
-                firebase_key = f"{match.group(1).lower()}{match.group(2)}"
-            else:
-                firebase_key = re.sub(r'\s+', '_', clean_name).lower()
+            firebase_key = self._node_key(mesh_address, raw_name)
 
             now_str = time.strftime('%Y-%m-%d %H:%M:%S')
             sensor_data = {
@@ -141,7 +156,7 @@ class FirebaseRTDB:
                 'created_at': now_str,
             }
 
-            history_key = self.root.child(f'{firebase_key}/history').push().key
+            history_key = history_key or self.root.child(f'{firebase_key}/history').push().key
             self.root.update({
                 f'{firebase_key}/sensor': sensor_data,
                 f'{firebase_key}/history/{history_key}': history_reading,
@@ -231,6 +246,9 @@ class Gateway:
         self.synchronized = False
         self.discovered = {}
         self.nodes = {}
+        self.firebase_queue = queue.Queue(maxsize=FIREBASE_QUEUE_SIZE)
+        self.firebase_worker = None
+        self.firebase_queue_dropped = 0
         self.status = {
             'state': 'starting', 'ready': False, 'transport': 'usb_serial',
             'baud_rate': BAUD_RATE, 'devices': [], 'nodes': [],
@@ -517,7 +535,7 @@ class Gateway:
             )
             conn.execute('UPDATE ble_nodes SET status=?,last_seen=CURRENT_TIMESTAMP WHERE mesh_address=?',
                          ('active', mesh_address))
-        firebase_ok = self.firebase.write_sensor(
+        firebase_queued = self._queue_firebase_sensor(
             mesh_address, zone_id, values, node_name=node_name, zone_name=zone_name
         )
         fields = {
@@ -525,14 +543,106 @@ class Gateway:
             'node_name': node_name,
             'last_sensor': values,
             'firebase_status': self.firebase.status,
+            'firebase_pending': self.firebase_queue.qsize(),
+            'firebase_queue_dropped': self.firebase_queue_dropped,
         }
         if self.firebase.error:
             fields['firebase_error'] = self.firebase.error
         else:
             self.status.pop('firebase_error', None)
-        if not firebase_ok and self.firebase.status == 'ready':
+        if not firebase_queued and self.firebase.status not in ('disabled', 'error'):
             fields['firebase_status'] = 'error'
         self.report(**fields)
+
+    def _queue_firebase_sensor(self, mesh_address, zone_id, values,
+                              node_name=None, zone_name=None):
+        if self.firebase.status == 'disabled':
+            return False
+        if not getattr(self.firebase, 'database', None) or not getattr(self.firebase, 'root', None):
+            return False
+
+        with self.lock:
+            if self.firebase_worker is None or not self.firebase_worker.is_alive():
+                self.firebase_worker = threading.Thread(
+                    target=self._run_firebase_writer,
+                    name='firebase-sensor-writer',
+                    daemon=True,
+                )
+                self.firebase_worker.start()
+
+        item = {
+            'mesh_address': mesh_address,
+            'zone_id': zone_id,
+            'values': dict(values),
+            'node_name': node_name,
+            'zone_name': zone_name,
+        }
+        try:
+            self.firebase_queue.put_nowait(item)
+            return True
+        except queue.Full:
+            # Keep the most recent samples flowing when Firebase is slower than
+            # the mesh. SQLite already stores every reading locally.
+            try:
+                self.firebase_queue.get_nowait()
+                self.firebase_queue.task_done()
+            except queue.Empty:
+                pass
+            with self.lock:
+                self.firebase_queue_dropped += 1
+            try:
+                self.firebase_queue.put_nowait(item)
+                return True
+            except queue.Full:
+                with self.lock:
+                    self.firebase_queue_dropped += 1
+                return False
+
+    def _run_firebase_writer(self):
+        while not self.stop_event.is_set():
+            try:
+                item = self.firebase_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            history_key = None
+            success = False
+            for attempt in range(FIREBASE_WRITE_ATTEMPTS):
+                if self.stop_event.is_set():
+                    break
+                try:
+                    if history_key is None:
+                        history_key = self.firebase.new_history_key(
+                            item['mesh_address'], item['node_name']
+                        )
+                    success = self.firebase.write_sensor(
+                        item['mesh_address'], item['zone_id'], item['values'],
+                        node_name=item['node_name'], zone_name=item['zone_name'],
+                        history_key=history_key,
+                    )
+                except Exception as error:
+                    self.firebase.status = 'error'
+                    self.firebase.error = str(error)
+                    success = False
+
+                if success or attempt + 1 >= FIREBASE_WRITE_ATTEMPTS:
+                    break
+                if self.stop_event.wait(FIREBASE_RETRY_DELAY * (2 ** attempt)):
+                    break
+
+            with self.lock:
+                self.status['firebase_status'] = self.firebase.status
+                self.status['firebase_pending'] = self.firebase_queue.qsize()
+                self.status['firebase_queue_dropped'] = self.firebase_queue_dropped
+                if self.firebase.error:
+                    self.status['firebase_error'] = self.firebase.error
+                else:
+                    self.status.pop('firebase_error', None)
+                if not success and self.firebase.status != 'disabled':
+                    self.status['firebase_last_write_failed'] = True
+                elif success:
+                    self.status.pop('firebase_last_write_failed', None)
+            self.firebase_queue.task_done()
 
     def command(self, request):
         action = request.get('action')
@@ -566,6 +676,8 @@ class Gateway:
     def stop(self):
         self.stop_event.set()
         self.disconnect()
+        if self.firebase_worker and self.firebase_worker.is_alive():
+            self.firebase_worker.join(timeout=2)
 
 
 class CommandHandler(socketserver.StreamRequestHandler):
