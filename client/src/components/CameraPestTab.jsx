@@ -443,47 +443,60 @@ export default function CameraPestTab() {
 
       {/* Pest History Gallery */}
       <section>
-        <div className="flex items-center justify-between mb-4 px-2">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">Lịch sử phân tích ảnh</h2>
-            <p className="text-sm text-slate-500">Mọi ảnh chụp và ảnh tải lên đã được AI xử lý, kể cả ảnh không phát hiện bệnh</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
-            <span className="text-xs font-medium text-slate-500">
-              Tổng cộng: {history.length} lần phân tích
+        <div className="mb-4 rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur-sm sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Lịch sử phân tích ảnh</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-500">Mọi ảnh chụp và ảnh tải lên đã được AI xử lý, kể cả ảnh không phát hiện bệnh.</p>
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {history.length} lần phân tích
             </span>
-            {history.length > 0 && (
-              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={allHistorySelected}
-                  onChange={handleToggleSelectAll}
-                  className="h-4 w-4 accent-emerald-600 cursor-pointer"
-                  aria-label="Chọn tất cả bản ghi"
-                />
-                <span>Chọn tất cả</span>
-              </label>
-            )}
-            {visibleSelectedItems.length > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                disabled={deletingSelected}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white rounded-lg transition-colors text-xs font-semibold shadow-sm"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{deletingSelected ? 'Đang xóa...' : `Xóa đã chọn (${visibleSelectedItems.length})`}</span>
-              </button>
-            )}
-            {history.length > 0 && (
-              <button 
-                onClick={handleClearHistory}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors text-xs font-semibold shadow-sm"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa tất cả</span>
-              </button>
-            )}
           </div>
+
+          {history.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex min-h-10 cursor-pointer select-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50/60">
+                  <input
+                    type="checkbox"
+                    checked={allHistorySelected}
+                    onChange={handleToggleSelectAll}
+                    className="h-4 w-4 cursor-pointer accent-emerald-600"
+                    aria-label="Chọn tất cả bản ghi"
+                  />
+                  <span>{allHistorySelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}</span>
+                </label>
+                {visibleSelectedItems.length > 0 && (
+                  <span className="text-xs font-medium text-slate-500" aria-live="polite">
+                    Đã chọn <strong className="text-slate-700">{visibleSelectedItems.length}</strong>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {visibleSelectedItems.length > 0 && (
+                  <button
+                    onClick={handleDeleteSelected}
+                    disabled={deletingSelected}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-rose-600 px-3.5 text-sm font-semibold text-white shadow-sm shadow-rose-200 transition-colors hover:bg-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>{deletingSelected ? 'Đang xóa...' : 'Xóa mục đã chọn'}</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleClearHistory}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-rose-200 bg-white px-3.5 text-sm font-semibold text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2"
+                  title="Xóa toàn bộ lịch sử phân tích"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>Xóa tất cả</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -513,22 +526,24 @@ export default function CameraPestTab() {
                 (isAnalysisFailed ? 'Không phân tích được ảnh' : 'Không phát hiện sâu bệnh');
               const hasImage = !!item.image_path;
 
+              const isSelected = selectedHistoryIds.has(item.id);
+
               return (
-                <div key={item.id} className="glass-panel overflow-hidden group hover:shadow-md transition-shadow">
+                <div key={item.id} className={`glass-panel group overflow-hidden transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-emerald-400 shadow-lg shadow-emerald-100/70' : ''}`}>
                   <div 
                     className="relative h-40 bg-slate-900 cursor-pointer overflow-hidden flex items-center justify-center"
                     onClick={() => hasImage && setSelectedImage(item.image_path)}
                   >
                     <label
-                      className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white/95 shadow-sm cursor-pointer"
+                      className={`absolute left-2 top-2 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border shadow-md backdrop-blur-sm transition-all ${isSelected ? 'border-emerald-300 bg-emerald-50/95' : 'border-white/80 bg-white/90 hover:bg-white'}`}
                       onClick={event => event.stopPropagation()}
                       title="Chọn bản ghi để xóa"
                     >
                       <input
                         type="checkbox"
-                        checked={selectedHistoryIds.has(item.id)}
+                        checked={isSelected}
                         onChange={() => toggleHistorySelection(item.id)}
-                        className="h-4 w-4 accent-emerald-600 cursor-pointer"
+                        className="h-4 w-4 cursor-pointer accent-emerald-600"
                         aria-label={`Chọn ${resultTitle} để xóa`}
                       />
                     </label>
