@@ -436,6 +436,16 @@ class Gateway:
             self.handle_node(event)
         elif kind == 'sensor':
             self.handle_sensor(event)
+        elif kind == 'debug':
+            # Firmware diagnostics arrive on the same JSON Lines stream as
+            # normal mesh events. Keep the latest one in the bridge snapshot;
+            # report() also writes every diagnostic to the PM2 stdout log.
+            fields = ('stage', 'detail', 'uptime_ms', 'callback_id', 'api_error',
+                      'status', 'opcode', 'source', 'net_idx', 'app_idx',
+                      'element', 'company_id', 'model_id', 'publish_addr',
+                      'length', 'page', 'rssi', 'uuid')
+            diagnostic = {key: event[key] for key in fields if key in event}
+            self.report(last_debug=diagnostic)
         elif kind == 'error':
             # A rejected command must not erase the operation still in progress.
             self.report(error=str(event.get('message') or 'ESP32 gateway error'))

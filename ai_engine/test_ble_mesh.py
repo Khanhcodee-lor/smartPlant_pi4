@@ -59,6 +59,21 @@ class GatewayTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'SPM1'):
             gateway.normalize_uuid('00' * 16)
 
+    def test_firmware_debug_event_is_visible_without_changing_mesh_state(self):
+        self.gateway.status.update(ready=True, state='attached')
+        self.gateway.fd = 1  # Snapshot readiness also requires a live serial fd.
+        self.gateway.handle_event({
+            'event': 'debug', 'stage': 'configuration_rx',
+            'detail': 'step=appkey_add', 'opcode': 32772,
+            'source': 2, 'status': 0,
+        })
+        snapshot = self.gateway.snapshot()
+        self.assertTrue(snapshot['ready'])
+        self.assertEqual(snapshot['state'], 'attached')
+        self.assertEqual(snapshot['last_debug']['stage'], 'configuration_rx')
+        self.assertEqual(snapshot['last_debug']['source'], 2)
+        self.gateway.fd = None
+
     def test_scan_node_and_sensor_events_update_status_and_database(self):
         self.gateway.handle_event({'event': 'scan_result', 'uuid': UUID, 'rssi': -61})
         self.assertEqual(self.gateway.snapshot()['devices'][0]['rssi'], -61)
