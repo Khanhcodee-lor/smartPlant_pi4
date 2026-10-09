@@ -207,7 +207,7 @@ export default function CameraPestTab() {
     critical: { label: 'Nghiêm trọng', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' },
     high: { label: 'Cao', bg: 'bg-orange-100', text: 'text-orange-600', dot: 'bg-orange-500' },
     medium: { label: 'Trung bình', bg: 'bg-amber-100', text: 'text-amber-600', dot: 'bg-amber-500' },
-    low: { label: 'Thấp', bg: 'bg-emerald-100', text: 'text-emerald-600', dot: 'bg-emerald-500' },
+    low: { label: 'Nhẹ', bg: 'bg-emerald-100', text: 'text-emerald-600', dot: 'bg-emerald-500' },
   };
 
   const formatTime = (timestamp) => {
@@ -512,7 +512,8 @@ export default function CameraPestTab() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {history.map((item) => {
-              const isDetected = item.status === 'detected' || (!item.status && !!item.pest_type);
+              const isHealthy = /healthy|cây khỏe mạnh/i.test(String(item.pest_type || ''));
+              const isDetected = !isHealthy && (item.status === 'detected' || (!item.status && !!item.pest_type));
               const isAnalysisFailed = item.status === 'analysis_failed';
               const sev = severityConfig[item.severity] || severityConfig.low;
               const badge = isDetected

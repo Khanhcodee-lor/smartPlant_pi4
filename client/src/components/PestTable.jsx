@@ -42,7 +42,7 @@ export default function PestTable({ pests }) {
       shadow: ''
     },
     low: {
-      label: 'Thấp',
+      label: 'Nhẹ',
       bg: 'bg-emerald-500/10',
       text: 'text-emerald-600',
       border: 'border-emerald-500/20',
