@@ -279,6 +279,14 @@ export async function removeBleNode(nodeId) {
   }
 }
 
+/** Forget a node record after its mesh reset timed out. */
+export async function forgetBleNode(nodeId) {
+  const res = await fetch(`${API_BASE}/ble/nodes/${nodeId}/forget`, { method: 'POST' });
+  const result = await res.json();
+  if (!res.ok || !result.success) throw new Error(result.error || 'Không thể bỏ bản ghi node');
+  return result;
+}
+
 /** Get zones with BLE mesh assignments — GET /api/ble/zones */
 export async function getBleZones() {
   const result = await apiFetch('/ble/zones');

@@ -179,3 +179,10 @@ chờ Node Reset Status rồi xóa DevKey/bản ghi node trong NVS và phát
 và dữ liệu của khu đó khi nhận xác nhận. Dấu xóa được lưu trong SQLite để bản
 snapshot cũ không tạo lại node sau F5/restart. Node tắt nguồn khiến xóa thất bại;
 bật node rồi thử lại. Sau reset thành công có thể Scan và Join node lại.
+
+Nếu một bản ghi cũ không còn phản hồi (ví dụ node đã được nạp UUID generation
+mới), `remove` sẽ hết thời gian chờ và node vẫn hiện trong danh sách. Khi trạng thái
+`remove_failed` hiện đúng UUID đó, nút **Bỏ bản ghi cũ** xóa bản ghi NVS trên
+gateway và Pi mà không reset ESP32. Chỉ dùng cho node cũ/offline; nếu node vật lý
+còn provisioned, reset node tại chỗ trước khi Join lại. Lệnh này cần gateway
+firmware 1.2.0 trở lên.

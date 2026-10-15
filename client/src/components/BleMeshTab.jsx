@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Bluetooth, RefreshCw, Radio, Cpu, Trash2, CheckCircle2, AlertCircle, Zap, Circle, Search, PlusCircle, Settings2, Edit2, Check, X } from 'lucide-react';
-import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, updateBleNodeName, removeBleNode, fetchZones } from '../api';
+import { getBleStatus, getBleNodes, scanBleDevices, provisionBleDevice, configureBleDevice, assignNodeToZone, updateBleNodeName, removeBleNode, forgetBleNode, fetchZones } from '../api';
 
 export default function BleMeshTab() {
   const [status, setStatus] = useState({ state: 'not_started' });
@@ -129,6 +129,20 @@ export default function BleMeshTab() {
       loadData();
     } catch (err) {
       setError(err.message || 'Không thể xóa node.');
+    } finally { setActionPending(''); }
+  };
+
+  const handleForget = async (node) => {
+    if (!confirm('Bỏ bản ghi node này khỏi gateway và Pi? Lệnh này không reset ESP32 cảm biến. Chỉ dùng với node cũ/offline; muốn join lại thì reset node tại chỗ trước. Dữ liệu của khu gắn với node sẽ bị xóa.')) return;
+    setError('');
+    setSuccessMsg('');
+    setActionPending('forget');
+    try {
+      await forgetBleNode(node.id);
+      setSuccessMsg('Đang bỏ bản ghi node khỏi gateway. Chờ gateway xác nhận.');
+      await loadData(true);
+    } catch (err) {
+      setError(err.message || 'Không thể bỏ bản ghi node.');
     } finally { setActionPending(''); }
   };
 
@@ -570,6 +584,16 @@ export default function BleMeshTab() {
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      {status.removal_failed_uuid === node.uuid && (
+                        <button
+                          onClick={() => handleForget(node)}
+                          disabled={!status.ready || !!actionPending || gatewayBusy}
+                          className="ml-2 text-xs text-red-700 underline disabled:opacity-50"
+                          title="Xóa bản ghi cũ trên gateway và Pi, không reset node cảm biến"
+                        >
+                          Bỏ bản ghi cũ
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

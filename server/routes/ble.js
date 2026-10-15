@@ -154,4 +154,16 @@ router.delete('/nodes/:id', async (req, res) => {
   }
 });
 
+// POST /api/ble/nodes/:id/forget - Remove a failed, unreachable node record.
+router.post('/nodes/:id/forget', async (req, res) => {
+  try {
+    const node = getDb().prepare('SELECT * FROM ble_nodes WHERE id = ?').get(req.params.id);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+    const result = await gatewayCommand({ action: 'forget', uuid: node.uuid });
+    res.status(result.success ? 202 : 409).json(result);
+  } catch (error) {
+    res.status(503).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

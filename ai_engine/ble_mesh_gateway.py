@@ -234,7 +234,13 @@ def configure_serial(fd):
 class Gateway:
     def __init__(self):
         with database() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS mesh_removals (uuid TEXT PRIMARY KEY, state TEXT NOT NULL)")
+            conn.execute("""CREATE TABLE IF NOT EXISTS mesh_removals (
+                uuid TEXT PRIMARY KEY, state TEXT NOT NULL,
+                action TEXT NOT NULL DEFAULT 'remove'
+            )""")
+            columns = {row['name'] for row in conn.execute('PRAGMA table_info(mesh_removals)')}
+            if 'action' not in columns:
+                conn.execute("ALTER TABLE mesh_removals ADD COLUMN action TEXT NOT NULL DEFAULT 'remove'")
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.fd = None
@@ -253,6 +259,12 @@ class Gateway:
             'state': 'starting', 'ready': False, 'transport': 'usb_serial',
             'baud_rate': BAUD_RATE, 'devices': [], 'nodes': [],
         }
+        with database() as conn:
+            failed_removal = conn.execute(
+                "SELECT uuid FROM mesh_removals WHERE state='failed' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+        if failed_removal:
+            self.status['removal_failed_uuid'] = failed_removal['uuid']
         self.firebase = FirebaseRTDB()
         self.status['firebase_status'] = self.firebase.status
         if self.firebase.error:
@@ -412,9 +424,11 @@ class Gateway:
                 self.write({'action': 'status'})  # Replay persisted nodes after boot/reconnect.
                 if self.status.get('state') in ('attached', 'remove_failed'):
                     with database() as conn:
-                        pending = conn.execute("SELECT uuid FROM mesh_removals WHERE state='pending' LIMIT 1").fetchone()
+                        pending = conn.execute(
+                            "SELECT uuid,action FROM mesh_removals WHERE state='pending' LIMIT 1"
+                        ).fetchone()
                     if pending:
-                        self.command({'action': 'remove', 'uuid': pending['uuid']})
+                        self.command({'action': pending['action'], 'uuid': pending['uuid']})
         elif kind == 'scan_result':
             ident = normalize_uuid(event.get('uuid'))
             device = {'uuid': ident, 'rssi': int(event.get('rssi', 0)), 'seen_at': time.time()}
@@ -428,7 +442,12 @@ class Gateway:
                 fields['error'] = str(event['error'])
             if state == 'remove_failed':
                 with database() as conn:
+                    pending = conn.execute(
+                        "SELECT uuid FROM mesh_removals WHERE state='pending' LIMIT 1"
+                    ).fetchone()
                     conn.execute("UPDATE mesh_removals SET state='failed' WHERE state='pending'")
+                if pending:
+                    fields['removal_failed_uuid'] = pending['uuid']
             self.report(state, **fields)
         elif kind == 'node_removed':
             self.finish_removal(normalize_uuid(event.get('uuid')))
@@ -494,7 +513,12 @@ class Gateway:
     def finish_removal(self, ident):
         with self.lock, database() as conn:
             row = conn.execute('SELECT zone_id FROM ble_nodes WHERE uuid=?', (ident,)).fetchone()
-            conn.execute("INSERT OR REPLACE INTO mesh_removals VALUES (?, 'confirmed')", (ident,))
+            removal = conn.execute('SELECT action FROM mesh_removals WHERE uuid=?', (ident,)).fetchone()
+            action = removal['action'] if removal else 'remove'
+            conn.execute(
+                "INSERT OR REPLACE INTO mesh_removals(uuid,state,action) VALUES (?, 'confirmed', ?)",
+                (ident, action),
+            )
             conn.execute('DELETE FROM ble_nodes WHERE uuid=?', (ident,))
             if row and row['zone_id'] is not None:
                 zone_id = row['zone_id']
@@ -504,7 +528,8 @@ class Gateway:
                     conn.execute('DELETE FROM zones WHERE id=?', (zone_id,))
             self.nodes.pop(ident, None)
             self.discovered.pop(ident, None)
-            for field in ('error', 'uuid', 'mesh_address', 'configured', 'sensor_address', 'last_sensor', *REQUIRED_FLAGS):
+            for field in ('error', 'uuid', 'mesh_address', 'configured', 'sensor_address',
+                          'last_sensor', 'removal_failed_uuid', 'removal_uuid', *REQUIRED_FLAGS):
                 self.status.pop(field, None)
             self.report('attached', removed_uuid=ident)
 
@@ -659,7 +684,7 @@ class Gateway:
         if action == 'status':
             return {'success': True, 'data': self.snapshot()}
         command = {'action': action}
-        if action in ('provision', 'configure', 'remove'):
+        if action in ('provision', 'configure', 'remove', 'forget'):
             command['uuid'] = normalize_uuid(request.get('uuid'))
         elif action != 'scan':
             raise ValueError('Unknown action')
@@ -668,19 +693,40 @@ class Gateway:
                 raise ValueError('ESP32 Mesh Gateway is not ready on USB')
             if self.status.get('state') in ('provisioning', 'configuring', 'removing'):
                 raise ValueError('Gateway đang thêm/cấu hình node. Chờ thao tác hiện tại hoàn tất.')
-            if action == 'remove':
-                if (self.status.get('firmware') or '1.0.0') < '1.1.0':
-                    raise ValueError('Cần firmware gateway 1.1.0 để xóa node khỏi mạng')
+            if action in ('remove', 'forget'):
+                firmware = tuple(int(part) for part in
+                                 str(self.status.get('firmware') or '0').split('.') if part.isdigit())
+                minimum = (1, 2, 0) if action == 'forget' else (1, 1, 0)
+                if firmware < minimum:
+                    required = '1.2.0' if action == 'forget' else '1.1.0'
+                    raise ValueError(f'Cần firmware gateway {required} để thao tác này')
                 with database() as conn:
-                    conn.execute("INSERT OR REPLACE INTO mesh_removals VALUES (?, 'pending')", (command['uuid'],))
+                    removal = conn.execute(
+                        'SELECT state,action FROM mesh_removals WHERE uuid=?', (command['uuid'],)
+                    ).fetchone()
+                if action == 'forget' and not (
+                    removal and (removal['state'] == 'failed' or
+                                 (removal['state'] == 'pending' and removal['action'] == 'forget'))
+                ):
+                    raise ValueError('Chỉ bỏ bản ghi node sau khi lệnh reset node đã thất bại')
+                with database() as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO mesh_removals(uuid,state,action) VALUES (?, 'pending', ?)",
+                        (command['uuid'], action),
+                    )
+                self.status.pop('removal_failed_uuid', None)
+                self.status['removal_uuid'] = command['uuid']
             if action == 'provision':
                 with database() as conn:
                     conn.execute('DELETE FROM mesh_removals WHERE uuid=?', (command['uuid'],))
+                if self.status.get('removal_failed_uuid') == command['uuid']:
+                    self.status.pop('removal_failed_uuid', None)
             self.write(command)
             if action == 'scan':
                 self.discovered.clear()
             self.report({'scan': 'scanning', 'provision': 'provisioning',
-                         'configure': 'configuring', 'remove': 'removing'}[action])
+                         'configure': 'configuring', 'remove': 'removing',
+                         'forget': 'removing'}[action])
         return {'success': True, 'message': 'Command sent; awaiting gateway result'}
 
     def stop(self):
@@ -723,7 +769,7 @@ def send_cli(action, ident):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', nargs='?', default='run',
-                        choices=['run', 'status', 'scan', 'provision', 'configure'])
+                        choices=['run', 'status', 'scan', 'provision', 'configure', 'remove', 'forget'])
     parser.add_argument('uuid', nargs='?')
     args = parser.parse_args()
     if args.action != 'run':
