@@ -147,6 +147,69 @@ function getCaptureTimeFields(date) {
 }
 
 const CAPTURE_COLLECTION = 'plant_captures';
+const PLANT_COLLECTION = 'plants';
+const DEFAULT_PLANT_ID = process.env.PLANT_ID || 'tomato_001';
+
+function getPlantCapturesCollection(firestore, plantId = DEFAULT_PLANT_ID) {
+  return firestore.collection(PLANT_COLLECTION).doc(plantId).collection(CAPTURE_COLLECTION);
+}
+
+async function ensurePlantDocument(firestore, plantId = DEFAULT_PLANT_ID) {
+  await firestore.collection(PLANT_COLLECTION).doc(plantId).set({
+    plant_id: plantId,
+    name: plantId
+  }, { merge: true });
+}
+
+function mergeCaptureDocuments(preferredDocs, fallbackDocs) {
+  const documentsById = new Map(preferredDocs.map(doc => [doc.id, doc]));
+  for (const doc of fallbackDocs) {
+    if (!documentsById.has(doc.id)) documentsById.set(doc.id, doc);
+  }
+  return [...documentsById.values()];
+}
+
+async function migrateLegacyCaptureDocuments(firestore) {
+  const legacySnapshot = await firestore.collection(CAPTURE_COLLECTION).get();
+  if (legacySnapshot.empty) return 0;
+
+  const plantIds = new Set();
+  for (const doc of legacySnapshot.docs) {
+    const candidate = String(doc.data().plant_id || DEFAULT_PLANT_ID).trim();
+    plantIds.add(candidate && !candidate.includes('/') ? candidate : DEFAULT_PLANT_ID);
+  }
+  await Promise.all([...plantIds].map(plantId => ensurePlantDocument(firestore, plantId)));
+
+  for (let offset = 0; offset < legacySnapshot.docs.length; offset += 200) {
+    const batch = firestore.batch();
+    const docs = legacySnapshot.docs.slice(offset, offset + 200);
+    for (const doc of docs) {
+      const record = doc.data();
+      const candidate = String(record.plant_id || DEFAULT_PLANT_ID).trim();
+      const plantId = candidate && !candidate.includes('/') ? candidate : DEFAULT_PLANT_ID;
+      batch.set(getPlantCapturesCollection(firestore, plantId).doc(doc.id), {
+        ...record,
+        capture_id: record.capture_id || doc.id,
+        plant_id: plantId
+      }, { merge: true });
+      batch.delete(doc.ref);
+    }
+    await batch.commit();
+  }
+
+  console.log(`[Pest History] Đã chuyển ${legacySnapshot.size} bản ghi vào plants/{plant_id}/${CAPTURE_COLLECTION}`);
+  return legacySnapshot.size;
+}
+
+async function getCaptureDocuments(firestore, Timestamp, cutoff) {
+  const plantCollection = getPlantCapturesCollection(firestore);
+  const legacyCollection = firestore.collection(CAPTURE_COLLECTION);
+  const [plantSnapshot, legacySnapshot] = await Promise.all([
+    plantCollection.where('captured_at', '>=', Timestamp.fromDate(cutoff)).get(),
+    legacyCollection.where('captured_at', '>=', Timestamp.fromDate(cutoff)).get()
+  ]);
+  return mergeCaptureDocuments(plantSnapshot.docs, legacySnapshot.docs);
+}
 
 function parseDate(value) {
   if (!value) return null;
@@ -217,6 +280,7 @@ function sqliteRowToFirebaseCapture(row, captureId) {
   const capturedAt = parseDate(row.timestamp) || new Date();
   return {
     capture_id: captureId,
+    plant_id: DEFAULT_PLANT_ID,
     source: 'sqlite_history',
     status: 'detected',
     captured_at: capturedAt,
@@ -235,6 +299,8 @@ function sqliteRowToFirebaseCapture(row, captureId) {
 }
 
 async function syncPendingSqliteHistory(db, firestore) {
+  await migrateLegacyCaptureDocuments(firestore);
+
   const pendingRows = db.prepare(`
     SELECT p.*, z.name AS zone_name
     FROM pest_detections p
@@ -244,7 +310,8 @@ async function syncPendingSqliteHistory(db, firestore) {
   `).all();
   if (!pendingRows.length) return 0;
 
-  const collection = firestore.collection(CAPTURE_COLLECTION);
+  await ensurePlantDocument(firestore);
+  const collection = getPlantCapturesCollection(firestore);
   const existingSnapshot = await collection.where('status', '==', 'detected').get();
   const existingDocs = existingSnapshot.docs;
   const usedCaptureIds = new Set();
@@ -280,7 +347,8 @@ async function syncPendingSqliteHistory(db, firestore) {
 
 async function syncSqliteRowToFirebase(db, firestore, row) {
   const captureId = row.firebase_capture_id || `sqlite-history-${row.id}`;
-  await firestore.collection(CAPTURE_COLLECTION).doc(captureId)
+  await ensurePlantDocument(firestore);
+  await getPlantCapturesCollection(firestore).doc(captureId)
     .set(sqliteRowToFirebaseCapture(row, captureId), { merge: true });
   db.prepare(`
     UPDATE pest_detections SET firebase_capture_id = ?
@@ -297,6 +365,7 @@ function mapFirebaseCapture(doc, zoneNames) {
   return {
     id: doc.id,
     capture_id: record.capture_id || doc.id,
+    plant_id: record.plant_id || DEFAULT_PLANT_ID,
     firebase_capture_id: doc.id,
     source: record.source || null,
     status,
@@ -391,6 +460,7 @@ async function saveTestImageCapture(filename, filePath, result, zoneId, captured
     Number.isFinite(Number(confidenceValue)) ? Number(confidenceValue) : null;
   const record = {
     capture_id: captureId,
+    plant_id: DEFAULT_PLANT_ID,
     source: 'pi_test_image',
     source_location: 'raspberry_pi_test_images',
     source_filename: filename,
@@ -411,7 +481,8 @@ async function saveTestImageCapture(filename, filePath, result, zoneId, captured
     analysis_error: null,
     annotation_storage_error: annotationStorageError
   };
-  await firestore.collection('plant_captures').doc(captureId).set(record);
+  await ensurePlantDocument(firestore);
+  await getPlantCapturesCollection(firestore).doc(captureId).set(record);
 
   return { captureId, originalImage, annotatedImage, record, confidence };
 }
@@ -577,6 +648,7 @@ router.post('/capture-analyze', async (req, res) => {
 
     const captureRecord = {
       capture_id: captureId,
+      plant_id: DEFAULT_PLANT_ID,
       source: 'camera',
       status: analysisStatus,
       captured_at: FieldValue.serverTimestamp(),
@@ -594,7 +666,8 @@ router.post('/capture-analyze', async (req, res) => {
       analysis_error: analysisError,
       annotation_storage_error: annotationStorageError
     };
-    await firestore.collection('plant_captures').doc(captureId).set(captureRecord);
+    await ensurePlantDocument(firestore);
+    await getPlantCapturesCollection(firestore).doc(captureId).set(captureRecord);
 
     if (hasPestDetection(result)) {
       const db = getDb();
@@ -708,10 +781,7 @@ router.get('/history', async (req, res) => {
         console.error('[Pest History] Không đồng bộ được SQLite lên Firestore:', syncError.message);
       }
 
-      const snapshot = await firestore.collection(CAPTURE_COLLECTION)
-        .where('captured_at', '>=', Timestamp.fromDate(cutoff))
-        .get();
-      const firebaseDocs = snapshot.docs;
+      const firebaseDocs = await getCaptureDocuments(firestore, Timestamp, cutoff);
       const firebaseItems = firebaseDocs
         .map(doc => mapFirebaseCapture(doc, zoneNames))
         .filter(item => {
@@ -873,13 +943,16 @@ router.delete('/selected', async (req, res) => {
     let firebaseChanges = 0;
 
     if (firestore) {
-      for (let offset = 0; offset < captureIds.length; offset += 400) {
+      const plantCollection = getPlantCapturesCollection(firestore);
+      const legacyCollection = firestore.collection(CAPTURE_COLLECTION);
+      for (let offset = 0; offset < captureIds.length; offset += 200) {
         const batch = firestore.batch();
-        for (const captureId of captureIds.slice(offset, offset + 400)) {
-          batch.delete(firestore.collection(CAPTURE_COLLECTION).doc(captureId));
+        for (const captureId of captureIds.slice(offset, offset + 200)) {
+          batch.delete(plantCollection.doc(captureId));
+          batch.delete(legacyCollection.doc(captureId));
         }
         await batch.commit();
-        firebaseChanges += Math.min(400, captureIds.length - offset);
+        firebaseChanges += Math.min(200, captureIds.length - offset);
       }
     }
 
@@ -921,12 +994,15 @@ router.delete('/all', async (req, res) => {
   try {
     const db = getDb();
     const { firestore } = getFirebaseServices();
-    const collection = firestore.collection(CAPTURE_COLLECTION);
-    const snapshot = await collection.get();
+    const [plantSnapshot, legacySnapshot] = await Promise.all([
+      getPlantCapturesCollection(firestore).get(),
+      firestore.collection(CAPTURE_COLLECTION).get()
+    ]);
+    const captureRefs = [...plantSnapshot.docs, ...legacySnapshot.docs].map(doc => doc.ref);
 
-    for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+    for (let offset = 0; offset < captureRefs.length; offset += 400) {
       const batch = firestore.batch();
-      for (const doc of snapshot.docs.slice(offset, offset + 400)) batch.delete(doc.ref);
+      for (const ref of captureRefs.slice(offset, offset + 400)) batch.delete(ref);
       await batch.commit();
     }
 
@@ -935,7 +1011,7 @@ router.delete('/all', async (req, res) => {
       success: true,
       message: 'Đã xóa lịch sử phát hiện trên SQLite và Firestore',
       changes: result.changes,
-      firebase_changes: snapshot.size
+      firebase_changes: captureRefs.length
     });
   } catch (err) {
     res.status(502).json({ error: `Không thể đồng bộ xóa lịch sử với Firebase: ${err.message}` });
