@@ -165,7 +165,7 @@ export default function ChatbotTab() {
               )}
             </div>
             <div
-              className={`max-w-[90%] sm:max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-sm ${
+              className={`max-w-[96%] sm:max-w-[94%] px-4 py-3 rounded-2xl text-sm shadow-sm ${
                 msg.sender === 'user'
                   ? 'bg-emerald-500 text-white rounded-br-none'
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'
