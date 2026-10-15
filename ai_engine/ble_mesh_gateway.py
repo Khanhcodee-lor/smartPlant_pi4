@@ -274,7 +274,14 @@ class Gateway:
         with self.lock:
             result = dict(self.status)
             result['ready'] = bool(self.fd is not None and self.status.get('ready'))
-            result['devices'] = list(self.discovered.values())
+            # The firmware accepts a provision request only for a beacon it saw
+            # within 30 seconds. Hide older scan results so the UI cannot submit
+            # a UUID that the gateway will reject as stale.
+            now = time.time()
+            result['devices'] = [
+                device for device in self.discovered.values()
+                if now - float(device.get('seen_at', 0)) < 25
+            ]
             result['nodes'] = list(self.nodes.values())
             result['serial_port'] = self.port
             result['last_gateway_seen'] = self.last_seen or None
