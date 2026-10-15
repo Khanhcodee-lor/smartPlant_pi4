@@ -101,7 +101,7 @@ export default function ChatbotTab() {
   };
 
   return (
-    <div className="glass-panel p-4 sm:p-6 flex flex-col h-[calc(100dvh-220px)] min-h-[560px] animate-fade-in-up">
+    <div className="glass-panel p-4 sm:p-6 flex flex-col h-[calc(100dvh-150px)] min-h-[560px] animate-fade-in-up">
       <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-200">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-md">
           <Bot className="w-6 h-6 text-white" />
@@ -165,7 +165,7 @@ export default function ChatbotTab() {
               )}
             </div>
             <div
-              className={`max-w-[96%] sm:max-w-[94%] px-4 py-3 rounded-2xl text-sm shadow-sm ${
+              className={`max-w-full px-4 py-3 rounded-2xl text-sm shadow-sm ${
                 msg.sender === 'user'
                   ? 'bg-emerald-500 text-white rounded-br-none'
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'

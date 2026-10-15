@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Thermometer, Droplets, Sprout, Bug, CloudRain, LayoutDashboard, Camera as CameraIcon, Bot } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Bug, LayoutDashboard, Camera as CameraIcon, Bot } from 'lucide-react';
 
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -208,20 +208,18 @@ export default function App() {
               <BleMeshTab />
             )}
 
-            {/* Footer */}
-            <footer className="text-center py-8 pt-12">
-              <div className="inline-flex items-center justify-center gap-2 mb-2">
-                <CloudRain className="w-4 h-4 text-emerald-500" />
-                <p className="text-sm font-medium text-slate-500 font-display">
+            {activeTab !== 'chat' && (
+              <footer className="text-center py-8 pt-12">
+                <p className="mb-2 text-sm font-medium text-slate-500 font-display">
                   Smart Plant Dashboard — Powered by Raspberry Pi 4
                 </p>
-              </div>
-              {lastUpdate && (
-                <p className="text-xs text-slate-400 font-mono">
-                  SYNC: {lastUpdate.toLocaleTimeString('vi-VN')}
-                </p>
-              )}
-            </footer>
+                {lastUpdate && (
+                  <p className="text-xs text-slate-400 font-mono">
+                    SYNC: {lastUpdate.toLocaleTimeString('vi-VN')}
+                  </p>
+                )}
+              </footer>
+            )}
           </>
         )}
           </div>
