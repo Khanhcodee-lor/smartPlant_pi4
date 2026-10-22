@@ -38,3 +38,8 @@ ai_engine/mesh_token.dat
 ble_mesh_status.json*
 ble_mesh.sock*
 __pycache__/
+
+# Raspberry Pi capture service
+.env
+captures/
+logs/

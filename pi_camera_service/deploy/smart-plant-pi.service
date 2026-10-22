@@ -1,0 +1,19 @@
+[Unit]
+Description=Smart Plant Raspberry Pi Capture Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartplant
+Group=smartplant
+WorkingDirectory=/opt/smart-plant/repository
+EnvironmentFile=/opt/smart-plant/repository/pi_camera_service/.env
+ExecStart=/opt/smart-plant/repository/.venv/bin/python -m pi_camera_service.main
+Restart=on-failure
+RestartSec=10
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
