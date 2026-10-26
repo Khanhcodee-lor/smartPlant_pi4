@@ -76,6 +76,15 @@ if [ -f "$SCRIPT_DIR/ai_engine/requirements-firebase.txt" ]; then
     "$SCRIPT_DIR/ai_engine/.venv/bin/pip" install -r "$SCRIPT_DIR/ai_engine/requirements-firebase.txt"
 fi
 
+# 3c. Cài dependencies riêng và đảm bảo virtualenv cho camera service tồn tại.
+CAMERA_SERVICE_DIR="$SCRIPT_DIR/pi_camera_service"
+if [ -f "$CAMERA_SERVICE_DIR/requirements.txt" ]; then
+    if [ ! -x "$CAMERA_SERVICE_DIR/.venv/bin/python" ]; then
+        python3 -m venv "$CAMERA_SERVICE_DIR/.venv"
+    fi
+    "$CAMERA_SERVICE_DIR/.venv/bin/pip" install -r "$CAMERA_SERVICE_DIR/requirements.txt"
+fi
+
 # 4. Khởi động lại các dịch vụ PM2
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Khởi động lại các dịch vụ Smart Plant..."
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔎 Web server được quản lý bởi smart-plant-engine, không chạy Node riêng trong PM2..."
@@ -91,6 +100,15 @@ if [ -x "$SCRIPT_DIR/ai_engine/.venv/bin/python" ]; then
     pm2 start "$SCRIPT_DIR/ai_engine/ble_mesh_gateway.py" --name smart-plant-ble \
         --interpreter "$SCRIPT_DIR/ai_engine/.venv/bin/python" --cwd "$SCRIPT_DIR/ai_engine"
 fi
+if [ -x "$CAMERA_SERVICE_DIR/.venv/bin/python" ]; then
+    if pm2 describe smart-plant-camera > /dev/null 2>&1; then
+        pm2 restart smart-plant-camera --update-env
+    else
+        pm2 start "$CAMERA_SERVICE_DIR/main.py" --name smart-plant-camera \
+            --interpreter "$CAMERA_SERVICE_DIR/.venv/bin/python" --cwd "$SCRIPT_DIR"
+    fi
+fi
 pm2 restart smart-plant-engine
+pm2 save
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✨ Cập nhật hoàn tất thành công lên commit $REMOTE!"

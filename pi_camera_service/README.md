@@ -1,7 +1,7 @@
 # Smart Plant Raspberry Pi Capture Service
 
 Service này chạy trên Raspberry Pi, polling `plants/{PLANT_ID}/commands/capture`,
-chụp bằng Picamera2, phân tích ảnh, upload Storage và ghi kết quả vào
+lấy ảnh JPEG từ endpoint `/snapshot` của ustreamer, phân tích ảnh, upload Storage và ghi kết quả vào
 `plants/{PLANT_ID}/plant_captures/{request_id}`. `request_id` là khóa idempotency:
 capture đã có `status=completed` sẽ không bị chụp lại sau restart. Trạng thái
 Firebase là nguồn bền vững; file local chỉ chứa ảnh để retry/điều tra, không tự
@@ -13,13 +13,13 @@ Trên Raspberry Pi OS Bookworm:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-picamera2 libcamera-apps
+sudo apt install -y python3-venv
 sudo mkdir -p /opt/smart-plant
 sudo chown "$USER" /opt/smart-plant
 git clone <repository-url> /opt/smart-plant/repository
 cd /opt/smart-plant/repository/pi_camera_service
-python3 -m venv --system-site-packages /opt/smart-plant/repository/.venv
-. /opt/smart-plant/repository/.venv/bin/activate
+python3 -m venv /opt/smart-plant/repository/pi_camera_service/.venv
+. /opt/smart-plant/repository/pi_camera_service/.venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -28,8 +28,8 @@ Tạo service account trong Firebase Console, tải JSON vào vị trí chỉ us
 
 ```bash
 cp .env.example .env
-chmod 600 .env /etc/smart-plant/firebase-service-account.json
-# sửa các giá trị Firebase và PLANT_ID trong .env
+chmod 600 .env /home/toan/Smart_Plant/ai_engine/config/pi4-iot.json
+# kiểm tra GOOGLE_APPLICATION_CREDENTIALS trỏ đúng tới service account JSON
 ```
 
 Không commit `.env` hoặc service-account JSON.
@@ -39,14 +39,15 @@ Không commit `.env` hoặc service-account JSON.
 Kiểm tra camera trước:
 
 ```bash
-libcamera-still -o /tmp/camera-test.jpg
+curl -f http://127.0.0.1:8080/snapshot -o /tmp/camera-test.jpg
 ```
 
 Chạy dry-run không cần camera/Firebase thật:
 
 ```bash
+cd /opt/smart-plant/repository
 DRY_RUN=true python -m pi_camera_service.main
-pytest -q
+python -m pytest -q pi_camera_service/tests
 ```
 
 Chạy thật:
@@ -54,6 +55,17 @@ Chạy thật:
 ```bash
 python -m pi_camera_service.main
 ```
+
+Chạy bằng PM2 (từ thư mục repository):
+
+```bash
+pm2 start pi_camera_service/main.py --name smart-plant-camera \
+  --interpreter pi_camera_service/.venv/bin/python --cwd "$PWD"
+pm2 save
+```
+
+`auto_update.sh` cài dependencies vào virtualenv này và restart service sau mỗi lần
+pull có commit mới.
 
 ## systemd và log
 

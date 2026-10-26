@@ -29,16 +29,20 @@ class Config:
     retry_base_seconds: float
     max_image_bytes: int
     dry_run: bool = False
+    ustreamer_url: str = "http://127.0.0.1:8080"
 
     @classmethod
     def from_env(cls, *, dry_run: bool | None = None) -> "Config":
         """Load `.env` and validate settings without exposing credentials."""
         from dotenv import load_dotenv
 
-        load_dotenv()
+        load_dotenv(Path(__file__).with_name(".env"))
         is_dry_run = _env_bool("DRY_RUN", False) if dry_run is None else dry_run
         values = {
-            "firebase_credentials_path": os.getenv("FIREBASE_CREDENTIALS_PATH", ""),
+            "firebase_credentials_path": os.getenv(
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                os.getenv("FIREBASE_CREDENTIALS_PATH", ""),
+            ),
             "database_url": os.getenv("FIREBASE_DATABASE_URL", ""),
             "storage_bucket": os.getenv("FIREBASE_STORAGE_BUCKET", ""),
             "plant_id": os.getenv("PLANT_ID", ""),
@@ -67,6 +71,7 @@ class Config:
             database_url=values["database_url"] or "https://dry-run.invalid",
             storage_bucket=values["storage_bucket"] or "dry-run-bucket",
             plant_id=plant_id,
+            ustreamer_url=os.getenv("USTREAMER_URL", "http://127.0.0.1:8080").rstrip("/"),
             capture_dir=Path(os.getenv("CAPTURE_DIR", "captures")).expanduser(),
             log_dir=Path(os.getenv("LOG_DIR", "logs")).expanduser(),
             poll_interval_seconds=_env_float("POLL_INTERVAL_SECONDS", 5.0, minimum=0.5),
