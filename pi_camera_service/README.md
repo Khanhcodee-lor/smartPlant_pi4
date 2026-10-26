@@ -7,6 +7,11 @@ capture đã có `status=completed` sẽ không bị chụp lại sau restart. T
 Firebase là nguồn bền vững; file local chỉ chứa ảnh để retry/điều tra, không tự
 động xóa ảnh cũ.
 
+`analysis_listener.py` xử lý thêm hàng đợi ảnh từ app tại
+`plants/{PLANT_ID}/commands/analyze`: ảnh tải từ Firebase Storage được đưa vào
+`ai_engine/build/smart_plant_engine --analyze`, rồi kết quả được ghi vào RTDB
+và mirror sang Firestore.
+
 ## Cài đặt
 
 Trên Raspberry Pi OS Bookworm:
@@ -61,11 +66,13 @@ Chạy bằng PM2 (từ thư mục repository):
 ```bash
 pm2 start pi_camera_service/main.py --name smart-plant-camera \
   --interpreter pi_camera_service/.venv/bin/python --cwd "$PWD"
+pm2 start pi_camera_service/analysis_listener.py --name smart-plant-ai-listener \
+  --interpreter pi_camera_service/.venv/bin/python --cwd "$PWD"
 pm2 save
 ```
 
-`auto_update.sh` cài dependencies vào virtualenv này và restart service sau mỗi lần
-pull có commit mới.
+`auto_update.sh` cài dependencies vào virtualenv này và restart cả hai service sau
+mỗi lần pull có commit mới.
 
 ## systemd và log
 

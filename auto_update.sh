@@ -108,6 +108,15 @@ if [ -x "$CAMERA_SERVICE_DIR/.venv/bin/python" ]; then
             --interpreter "$CAMERA_SERVICE_DIR/.venv/bin/python" --cwd "$SCRIPT_DIR"
     fi
 fi
+if [ -x "$CAMERA_SERVICE_DIR/.venv/bin/python" ]; then
+    if pm2 describe smart-plant-ai-listener > /dev/null 2>&1; then
+        pm2 restart smart-plant-ai-listener --update-env
+    else
+        pm2 start "$CAMERA_SERVICE_DIR/analysis_listener.py" \
+            --name smart-plant-ai-listener \
+            --interpreter "$CAMERA_SERVICE_DIR/.venv/bin/python" --cwd "$SCRIPT_DIR"
+    fi
+fi
 pm2 restart smart-plant-engine
 pm2 save
 
