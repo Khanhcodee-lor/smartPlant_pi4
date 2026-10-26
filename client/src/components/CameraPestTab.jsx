@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
-import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, captureAndAnalyze } from '../api';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture } from '../api';
 import { Trash2 } from 'lucide-react';
 
 export default function CameraPestTab() {
@@ -174,32 +174,53 @@ export default function CameraPestTab() {
     setAnalyzing(true);
     setAnalysisResult(null);
     setCaptureError(null);
-    // Giữ livestream trong lúc phân tích, chỉ tắt sau khi có kết quả
-    
-    const res = await captureAndAnalyze();
-    if (res?.success) {
-      setIsLiveStreamMode(false);
-      setAnalysisResult(res.data ? { ...res.data, firebase_capture_id: res.capture?.id || null } : null);
-
-      if (res.data?.image_b64) setActiveTestImage(res.data.image_b64);
-      else if (res.capture?.annotated_image_url) setActiveTestImage(res.capture.annotated_image_url);
-      else if (res.capture?.original_image_url) setActiveTestImage(res.capture.original_image_url);
-      else if (res.capture?.preview_url) setActiveTestImage(`${res.capture.preview_url}?t=${Date.now()}`);
-      else if (res.data?.image_path) setActiveTestImage(`${res.data.image_path}?t=${Date.now()}`);
-
-      if (res.analysis_error) {
-        setCaptureError('Đã lưu ảnh lên Firebase nhưng AI chưa phân tích được: ' + res.analysis_error);
-        setTimeout(() => setCaptureError(null), 8000);
+    setIsLiveStreamMode(false);
+    try {
+      const request = await requestPiCameraCapture();
+      if (!request?.success || !request.request_id) {
+        throw new Error(request?.error || 'Không gửi được lệnh chụp tới Raspberry Pi.');
       }
-      await refreshHistoryAfterAnalysis();
-    } else {
+
+      const deadline = Date.now() + 120000;
+      let result = null;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        result = await fetchPiCameraCapture(request.request_id);
+        if (!result?.success) {
+          throw new Error(result?.error || 'Không đọc được trạng thái chụp từ Raspberry Pi.');
+        }
+        if (result.status === 'failed') {
+          throw new Error(result.error || 'Raspberry Pi không chụp được ảnh.');
+        }
+        if (result.status === 'completed') break;
+      }
+
+      if (result?.status !== 'completed' || !result.capture) {
+        throw new Error('Raspberry Pi chưa hoàn tất chụp ảnh sau 2 phút. Vui lòng thử lại.');
+      }
+
+      const capture = result.capture;
+      const detection = capture.detections?.[0] || {};
+      const disease = detection.disease_class || capture.diseaseClass || 'Không phát hiện bệnh';
+      const confidence = detection.confidence ?? capture.confidence ?? 0;
+      const imageUrl = capture.preview_url || capture.snapshot_url || capture.snapshotUrl;
+
+      if (imageUrl) setActiveTestImage(imageUrl);
+      setAnalysisResult({
+        pest_type: disease,
+        confidence: Number(confidence) || 0,
+        notes: 'Ảnh được chụp trực tiếp bằng camera trên Raspberry Pi.',
+        firebase_capture_id: request.request_id,
+        capture_source: 'pi_camera'
+      });
+      setLiveRefreshKey(Date.now());
+    } catch (error) {
       setIsLiveStreamMode(false);
-      if (res?.preview_url) setActiveTestImage(`${res.preview_url}?t=${Date.now()}`);
-      setCaptureError(res?.error || 'Không thể chụp ảnh hoặc lưu lên Firebase. Vui lòng thử lại.');
-      // Tự động ẩn lỗi sau 5 giây
-      setTimeout(() => setCaptureError(null), 5000);
+      setCaptureError(error.message || 'Không thể chụp ảnh bằng camera Raspberry Pi.');
+      setTimeout(() => setCaptureError(null), 8000);
+    } finally {
+      setAnalyzing(false);
     }
-    setAnalyzing(false);
   };
 
 
@@ -243,10 +264,10 @@ export default function CameraPestTab() {
               onClick={handleCaptureCamera}
               disabled={analyzing}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 transition-colors shadow-sm disabled:opacity-50"
-              title="Chụp 1 kiểu ảnh từ webcam và ném cho AI nhận diện ngay"
+              title="Gửi lệnh để Raspberry Pi chụp ảnh bằng camera của Pi"
             >
               <Camera className="w-4 h-4 text-rose-600" />
-              <span>Chụp & Nhận diện ngay</span>
+              <span>Chụp bằng camera Pi</span>
             </button>
 
             <button 
@@ -320,12 +341,12 @@ export default function CameraPestTab() {
               <Sparkles className="w-5 h-5 text-emerald-600 shrink-0" />
               <div>
                 <p className="text-xs font-bold text-slate-900">
-                  Kết quả phân tích: <span className="text-emerald-700">{analysisResult.pest_type}</span> ({Math.round(analysisResult.confidence * 100)}%)
+                  {analysisResult.capture_source === 'pi_camera' ? 'Ảnh từ camera Pi:' : 'Kết quả phân tích:'} <span className="text-emerald-700">{analysisResult.pest_type}</span> ({Math.round(analysisResult.confidence * 100)}%)
                 </p>
                 <p className="text-[11px] text-slate-600 mt-0.5">{analysisResult.notes}</p>
                 {analysisResult.firebase_capture_id && (
                   <p className="text-[10px] text-emerald-700 mt-0.5">
-                    Đã lưu Firestore/Storage · {analysisResult.firebase_capture_id}
+                    Đã lưu Firebase · {analysisResult.firebase_capture_id}
                   </p>
                 )}
               </div>
@@ -383,8 +404,8 @@ export default function CameraPestTab() {
           {analyzing && (
             <div className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm flex flex-col items-center justify-center text-white z-20 animate-fade-in-up">
               <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
-              <p className="font-bold text-sm tracking-wide">Đang chạy mô hình AI YOLOv8...</p>
-              <p className="text-xs text-slate-300 mt-1">Đang phân tích và vẽ khung nhận diện bệnh trên ảnh</p>
+              <p className="font-bold text-sm tracking-wide">Đang chờ Raspberry Pi chụp ảnh...</p>
+              <p className="text-xs text-slate-300 mt-1">Pi sẽ nhận lệnh, chụp bằng Picamera2 và gửi ảnh lên Firebase</p>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { cert, getApps, initializeApp } = require('firebase-admin/app');
+const { getDatabase } = require('firebase-admin/database');
 const { FieldValue, Timestamp, getFirestore } = require('firebase-admin/firestore');
 const { getDownloadURL, getStorage } = require('firebase-admin/storage');
 
@@ -25,18 +26,22 @@ function getFirebaseServices() {
   // New Firebase projects use *.firebasestorage.app by default. Override this
   // with the exact bucket name shown in Firebase Console → Storage if needed.
   const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`;
+  const databaseURL = process.env.FIREBASE_DATABASE_URL;
   let app = getApps().find(item => item.name === APP_NAME);
   if (!app) {
-    app = initializeApp({
+    const options = {
       credential: cert(serviceAccount),
       projectId,
       storageBucket
-    }, APP_NAME);
+    };
+    if (databaseURL) options.databaseURL = databaseURL;
+    app = initializeApp(options, APP_NAME);
   }
 
   return {
     firestore: getFirestore(app),
     bucket: getStorage(app).bucket(storageBucket),
+    database: databaseURL ? getDatabase(app) : null,
     FieldValue,
     Timestamp,
     getDownloadURL

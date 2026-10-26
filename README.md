@@ -127,15 +127,18 @@ npm install -g pm2
 
 ### Firebase: lưu ảnh camera và kết quả nhận diện
 
-Backend dùng Firebase Admin SDK để lưu ảnh trong Cloud Storage for Firebase và tạo một tài liệu Firestore cho mỗi lần chụp. Trong Firebase Console của dự án `pi4-iot-1b7bb`, hãy bật Firestore Database và Storage. Cloud Storage for Firebase yêu cầu dự án dùng gói Blaze. Mở **Storage → Files**, lấy đúng tên bucket đang hiển thị (bỏ tiền tố `gs://`) rồi đặt vào `FIREBASE_STORAGE_BUCKET`; bucket có thể mang tên `.firebasestorage.app` hoặc `.appspot.com` tùy thời điểm tạo dự án.
+Backend dùng Firebase Admin SDK để lưu ảnh trong Cloud Storage for Firebase và tạo một tài liệu Firestore cho mỗi lần chụp. Trong Firebase Console của dự án `pi4-iot-1b7bb`, hãy bật Firestore Database, Realtime Database và Storage. Cloud Storage for Firebase yêu cầu dự án dùng gói Blaze. Mở **Storage → Files**, lấy đúng tên bucket đang hiển thị (bỏ tiền tố `gs://`) rồi đặt vào `FIREBASE_STORAGE_BUCKET`; bucket có thể mang tên `.firebasestorage.app` hoặc `.appspot.com` tùy thời điểm tạo dự án. Lấy URL chính xác của Realtime Database trong Firebase Console để đặt vào `FIREBASE_DATABASE_URL`.
 
 Đặt service-account JSON tại `ai_engine/config/pi4-iot.json` trên Pi. File này đã bị Git ignore; không đưa khóa lên GitHub. Trên Pi, tạo/cập nhật `server/.env` theo các dòng sau, thay bucket bằng tên lấy trong Firebase Console nếu khác:
 
 ```dotenv
 FIREBASE_PROJECT_ID=pi4-iot-1b7bb
 FIREBASE_STORAGE_BUCKET=pi4-iot-1b7bb.firebasestorage.app
+FIREBASE_DATABASE_URL=https://<project>-default-rtdb.<region>.firebasedatabase.app
 GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 ```
+
+Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` sẽ nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật kết quả. Ứng dụng theo dõi `GET /api/camera/capture/{request_id}` để hiển thị ảnh. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
 
 Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`. Web server Node.js do `smart-plant-engine` khởi chạy và quản lý; script cập nhật sẽ xóa tiến trình PM2 `smart-plant-server` cũ nếu còn sót rồi restart engine. Không chạy thêm Node server riêng bằng PM2 vì sẽ tranh cổng 3000. Dữ liệu được ghi như sau:
 

@@ -180,6 +180,32 @@ export async function captureAndAnalyze() {
   }
 }
 
+/** Queue a still capture on the Raspberry Pi camera service. */
+export async function requestPiCameraCapture() {
+  try {
+    const res = await fetch(`${API_BASE}/camera/capture`, { method: 'POST' });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) return { ...result, success: false };
+    return result;
+  } catch (err) {
+    console.error('[API] requestPiCameraCapture:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/** Read the current state and result for a Raspberry Pi capture request. */
+export async function fetchPiCameraCapture(requestId) {
+  try {
+    const res = await fetch(`${API_BASE}/camera/capture/${encodeURIComponent(requestId)}`);
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) return { ...result, success: false };
+    return result;
+  } catch (err) {
+    console.error('[API] fetchPiCameraCapture:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 /** Get current WiFi status — GET /api/wifi/status */
 export async function getWifiStatus() {
   const result = await apiFetch('/wifi/status');

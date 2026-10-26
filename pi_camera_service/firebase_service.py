@@ -74,5 +74,7 @@ class FirebaseService:
         try:
             blob.make_public()
             return blob.public_url
-        except (OSError, RuntimeError):
+        except Exception:
+            # Private buckets still work: the server can create a short-lived
+            # signed preview URL when the app polls this capture.
             return storage_path
