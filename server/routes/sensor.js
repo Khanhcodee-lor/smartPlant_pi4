@@ -9,7 +9,7 @@ router.get('/latest', (req, res) => {
     const row = db.prepare(`
       SELECT s.*, z.name as zone_name
       FROM sensor_data s
-      INNER JOIN ble_nodes bn ON bn.zone_id = s.zone_id
+      LEFT JOIN ble_nodes bn ON bn.zone_id = s.zone_id
       LEFT JOIN zones z ON s.zone_id = z.id
       ORDER BY s.timestamp DESC
       LIMIT 1
@@ -35,9 +35,6 @@ router.get('/latest-by-zone', (req, res) => {
       INNER JOIN (
         SELECT zone_id, MAX(timestamp) as max_ts
         FROM sensor_data sd
-        WHERE EXISTS (
-          SELECT 1 FROM ble_nodes bn WHERE bn.zone_id = sd.zone_id
-        )
         GROUP BY zone_id
       ) latest ON s.zone_id = latest.zone_id AND s.timestamp = latest.max_ts
       LEFT JOIN zones z ON s.zone_id = z.id
@@ -60,7 +57,7 @@ router.get('/history', (req, res) => {
     let query = `
       SELECT s.*, z.name as zone_name
       FROM sensor_data s
-      INNER JOIN ble_nodes bn ON bn.zone_id = s.zone_id
+      LEFT JOIN ble_nodes bn ON bn.zone_id = s.zone_id
       LEFT JOIN zones z ON s.zone_id = z.id
       WHERE s.timestamp >= datetime('now', ?)
     `;
@@ -91,7 +88,7 @@ router.post('/', (req, res) => {
       VALUES (?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(temperature, humidity, light, soil_moisture, zone_id || null);
+    const result = stmt.run(temperature, humidity, light, soil_moisture, zone_id || 1);
 
     res.status(201).json({
       message: 'Sensor data recorded',

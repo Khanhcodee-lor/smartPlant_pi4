@@ -9,18 +9,18 @@ router.get('/', (req, res) => {
 
     const rows = db.prepare(`
       SELECT z.*,
-        CASE WHEN bn.id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM sensor_data WHERE zone_id = z.id) END as sensor_readings,
+        (SELECT COUNT(*) FROM sensor_data WHERE zone_id = z.id) as sensor_readings,
         (SELECT COUNT(*) FROM pest_detections WHERE zone_id = z.id) as pest_count,
-        CASE WHEN bn.id IS NULL THEN NULL ELSE (SELECT temperature FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) END as latest_temp,
-        CASE WHEN bn.id IS NULL THEN NULL ELSE (SELECT humidity FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) END as latest_humidity,
-        CASE WHEN bn.id IS NULL THEN NULL ELSE (SELECT soil_moisture FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) END as latest_soil_moisture,
+        (SELECT temperature FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_temp,
+        (SELECT humidity FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_humidity,
+        (SELECT soil_moisture FROM sensor_data WHERE zone_id = z.id ORDER BY timestamp DESC LIMIT 1) as latest_soil_moisture,
         bn.name as node_name,
         bn.mesh_address as node_mesh_address,
         bn.status as node_status,
         bn.last_seen as node_last_seen,
         bn.uuid as node_uuid
       FROM zones z
-      INNER JOIN ble_nodes bn ON bn.zone_id = z.id AND bn.status IN ('configured', 'active')
+      LEFT JOIN ble_nodes bn ON bn.zone_id = z.id
       ORDER BY z.name
     `).all();
 

@@ -99,9 +99,15 @@ function initDatabase() {
       WHERE firebase_capture_id IS NOT NULL;
   `);
 
-  // Zones are created dynamically when ESP32 nodes join the BLE Mesh network.
-  // No auto-seeding needed.
-  
+  // Ensure at least a default zone exists for Wi-Fi sensor nodes
+  const zoneRow = database.prepare('SELECT COUNT(*) as cnt FROM zones').get();
+  if (zoneRow && zoneRow.cnt === 0) {
+    database.prepare('INSERT INTO zones (id, name, description) VALUES (1, ?, ?)').run(
+      'Khu vực chính',
+      'Khu vực giám sát cảm biến Wi-Fi'
+    );
+  }
+
   console.log('✅ Database initialized successfully');
 }
 
