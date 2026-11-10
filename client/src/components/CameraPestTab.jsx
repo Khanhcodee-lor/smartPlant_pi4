@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
 import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture } from '../api';
 import { Trash2 } from 'lucide-react';
@@ -451,7 +452,12 @@ export default function CameraPestTab() {
                 </button>
               )}
               <button 
-                onClick={() => setSelectedImage(activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`)}
+                onClick={() => setSelectedImage({
+                  url: activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`,
+                  title: analysisResult ? `${analysisResult.pest_type} (${Math.round((analysisResult.confidence || 0) * 100)}%)` : 'Ảnh Camera / Nhận diện gần nhất',
+                  time: new Date().toLocaleString('vi-VN'),
+                  notes: analysisResult?.notes || 'Ảnh từ camera thời gian thực.'
+                })}
                 className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors text-white"
                 title="Phóng to ảnh"
               >
@@ -554,7 +560,15 @@ export default function CameraPestTab() {
                 <div key={item.id} className={`glass-panel group overflow-hidden transition-all hover:shadow-md ${isSelected ? 'ring-2 ring-emerald-400 shadow-lg shadow-emerald-100/70' : ''}`}>
                   <div 
                     className="relative h-40 bg-slate-900 cursor-pointer overflow-hidden flex items-center justify-center"
-                    onClick={() => hasImage && setSelectedImage(item.image_path)}
+                    onClick={() => hasImage && setSelectedImage({
+                      url: item.image_path,
+                      title: resultTitle,
+                      confidence: confidence,
+                      time: formatTime(item.timestamp),
+                      notes: item.notes || item.analysis_error,
+                      zone: item.zone_name || (item.source === 'camera' ? 'Camera' : item.source ? 'Ảnh tải lên' : 'Khu vực không rõ'),
+                      badge: badge
+                    })}
                   >
                     <label
                       className={`absolute left-2 top-2 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border shadow-md backdrop-blur-sm transition-all ${isSelected ? 'border-emerald-300 bg-emerald-50/95' : 'border-white/80 bg-white/90 hover:bg-white'}`}
@@ -613,13 +627,13 @@ export default function CameraPestTab() {
       </section>
 
       {/* Modal: Chọn ảnh từ thẻ nhớ */}
-      {showTestModal && (
+      {showTestModal && createPortal(
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in-up"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4"
           onClick={() => setShowTestModal(false)}
         >
           <div 
-            className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in-up"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -693,30 +707,60 @@ export default function CameraPestTab() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Modal phóng to ảnh */}
-      {selectedImage && (
+      {/* Modal phóng to ảnh / Chi tiết lịch sử */}
+      {selectedImage && createPortal(
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in-up"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4"
           onClick={() => setSelectedImage(null)}
         >
-          <div className="relative max-w-4xl w-full">
-            <button 
-              className="absolute -top-12 right-0 p-2 text-white/70 hover:text-white transition-colors"
-              onClick={() => setSelectedImage(null)}
-            >
-              <X className="w-8 h-8" />
-            </button>
-            <img 
-              src={selectedImage} 
-              alt="Phóng to"
-              className="w-full h-auto max-h-[80vh] object-contain rounded-xl shadow-2xl ring-1 ring-white/10"
-              onClick={(e) => e.stopPropagation()}
-            />
+          <div 
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-fade-in-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  {selectedImage?.title || 'Chi tiết hình ảnh'}
+                </h3>
+                {selectedImage?.time && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {selectedImage.time} {selectedImage.zone ? `· ${selectedImage.zone}` : ''}
+                    {selectedImage.confidence !== null && selectedImage.confidence !== undefined 
+                      ? ` · Độ tin cậy: ${Math.round(selectedImage.confidence * 100)}%` 
+                      : ''}
+                  </p>
+                )}
+              </div>
+              <button 
+                onClick={() => setSelectedImage(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
+                title="Đóng (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-950">
+              <img 
+                src={typeof selectedImage === 'object' ? selectedImage.url : selectedImage} 
+                alt="Chi tiết"
+                className="w-full h-auto max-h-[65vh] object-contain rounded-xl shadow-lg"
+              />
+            </div>
+
+            {selectedImage?.notes && (
+              <div className="p-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-600">
+                <span className="font-semibold text-slate-700">Chẩn đoán: </span>
+                {selectedImage.notes}
+              </div>
+            )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

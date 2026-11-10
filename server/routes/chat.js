@@ -3,8 +3,7 @@ const axios = require('axios');
 
 const router = express.Router();
 
-const CHATBOT_FUNCTION_URL = process.env.CHATBOT_FUNCTION_URL
-  || 'https://askchatbot-3kmr3fah5a-uc.a.run.app';
+const CHATBOT_FUNCTION_URL = process.env.CHATBOT_FUNCTION_URL?.trim();
 
 const SYSTEM_PREFIX = [
   '[Hệ thống: Trả lời bằng tiếng Việt, ngắn gọn, đúng trọng tâm, tối đa 3-5 câu.',
@@ -22,6 +21,12 @@ router.post('/', async (req, res) => {
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
+  }
+
+  if (!CHATBOT_FUNCTION_URL) {
+    return res.status(503).json({
+      error: 'Chưa cấu hình URL Firebase Function askChatbot trong CHATBOT_FUNCTION_URL.',
+    });
   }
 
   const history = Array.isArray(req.body?.history)
@@ -68,8 +73,13 @@ router.post('/', async (req, res) => {
     const status = error.response?.status;
     const detail = error.response?.data?.error?.message || error.message;
     console.error(`[chat] askChatbot request failed${status ? ` (${status})` : ''}: ${detail}`);
+    const userMessage = status === 404
+      ? 'Firebase Function askChatbot trả HTTP 404. CHATBOT_FUNCTION_URL hiện tại không trỏ tới function đang hoạt động.'
+      : status === 401 || status === 403
+        ? `Firebase Function askChatbot từ chối yêu cầu (HTTP ${status}). Kiểm tra quyền truy cập của function.`
+        : 'Không kết nối được Firebase Function askChatbot. Kiểm tra URL và kết nối mạng của Raspberry Pi.';
     return res.status(502).json({
-      error: 'Không gọi được trợ lý Gemini. Vui lòng thử lại sau.',
+      error: userMessage,
     });
   }
 });
