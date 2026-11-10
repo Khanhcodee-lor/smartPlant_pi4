@@ -308,7 +308,7 @@ Trên chính Pi: `http://localhost:3000`
 
 | Method | Endpoint    | Mô tả                                                     |
 | ------ | ----------- | --------------------------------------------------------- |
-| `POST` | `/api/chat` | Gửi tin nhắn cho Trợ lý AI (body: `{ "message": "..." }`) |
+| `POST` | `/api/chat` | Gửi tin nhắn, lịch sử hội thoại và ngữ cảnh cảm biến/bơm Firebase cho Trợ lý AI |
 
 ### Ví dụ gửi dữ liệu bằng curl
 

@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Leaf, MessageCircle } from 'lucide-react';
-import { fetchPestHistory, sendChatMessage } from '../api';
+import {
+  fetchFirebaseSensorData,
+  fetchPestHistory,
+  fetchPumpControl,
+  sendChatMessage,
+} from '../api';
 
 export default function ChatbotTab() {
   const [messages, setMessages] = useState([
@@ -14,13 +19,18 @@ export default function ChatbotTab() {
   const [isLoading, setIsLoading] = useState(false);
   const [diseaseHistory, setDiseaseHistory] = useState([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [gardenContext, setGardenContext] = useState(null);
   const chatContainerRef = useRef(null);
 
   useEffect(() => {
     let isActive = true;
 
     const loadDiseaseHistory = async () => {
-      const history = await fetchPestHistory(3650);
+      const [history, sensors, pump] = await Promise.all([
+        fetchPestHistory(3650),
+        fetchFirebaseSensorData(),
+        fetchPumpControl(),
+      ]);
       if (!isActive) return;
 
       const detectedDiseases = (Array.isArray(history) ? history : [])
@@ -33,6 +43,27 @@ export default function ChatbotTab() {
         .slice(0, 10);
 
       setDiseaseHistory(detectedDiseases);
+      setGardenContext({
+        nodes: (sensors?.nodes || []).slice(0, 8).map((node) => ({
+          name: node.name,
+          temperature: node.latest_temp,
+          humidity: node.latest_humidity,
+          soil_moisture: node.latest_soil_moisture,
+          light: node.latest_light,
+          updated_at: node.updated_at,
+        })),
+        pump: pump ? {
+          mode: pump.mode || pump.command,
+          enabled: pump.enabled,
+          manual_override: pump.manual_override,
+        } : null,
+        recent_diseases: detectedDiseases.slice(0, 5).map((item) => ({
+          name: item.pest_type,
+          area: item.zone_name || null,
+          detected_at: item.timestamp || null,
+          confidence: item.confidence ?? null,
+        })),
+      });
       setIsHistoryLoading(false);
     };
 
@@ -65,7 +96,14 @@ export default function ChatbotTab() {
     setIsLoading(true);
 
     try {
-      const response = await sendChatMessage(userMessage.text);
+      const conversation = messages
+        .filter((item) => item.id !== 1)
+        .slice(-10)
+        .map((item) => ({
+          role: item.sender === 'user' ? 'user' : 'assistant',
+          content: item.text,
+        }));
+      const response = await sendChatMessage(userMessage.text, gardenContext, conversation);
       setMessages((prev) => [
         ...prev,
         {
@@ -110,6 +148,29 @@ export default function ChatbotTab() {
           <h2 className="text-xl font-bold text-slate-900 font-display">Trợ lý AI Thực vật</h2>
           <p className="text-sm text-slate-500">Sẵn sàng giải đáp mọi thắc mắc của bạn</p>
         </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-semibold text-slate-500">AI có ngữ cảnh:</span>
+        {gardenContext?.nodes?.length ? (
+          <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-emerald-700">
+            {gardenContext.nodes.length} node cảm biến
+          </span>
+        ) : (
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-500">
+            Chưa có số đo Firebase
+          </span>
+        )}
+        {gardenContext?.pump && (
+          <span className="rounded-full border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-cyan-700">
+            Bơm: {gardenContext.pump.mode === 'auto' ? 'tự động' : gardenContext.pump.enabled ? 'đang bật' : 'đang tắt'}
+          </span>
+        )}
+        {gardenContext?.recent_diseases?.length > 0 && (
+          <span className="rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1 text-amber-700">
+            {gardenContext.recent_diseases.length} phát hiện bệnh gần đây
+          </span>
+        )}
       </div>
 
       <section className="mb-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 sm:p-4">

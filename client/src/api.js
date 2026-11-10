@@ -132,13 +132,13 @@ export async function fetchPestHistory(days = 30) {
   return result?.data || [];
 }
 
-/** Send Chat Message to Mock AI — POST /api/chat */
-export async function sendChatMessage(message) {
+/** Send a chat turn and current garden context to the Firebase Gemini service. */
+export async function sendChatMessage(message, context = null, history = []) {
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message, context, history })
     });
     if (!res.ok) throw new Error('Chat API Error');
     return await res.json();
