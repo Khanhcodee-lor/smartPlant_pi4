@@ -1,11 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Leaf, MessageCircle } from 'lucide-react';
+import { Send, Bot, User, Loader2, Leaf, MessageCircle, LogIn, LogOut } from 'lucide-react';
 import {
   fetchFirebaseSensorData,
   fetchPestHistory,
   fetchPumpControl,
   sendChatMessage,
 } from '../api';
+import {
+  describeFirebaseChatError,
+  observeFirebaseUser,
+  signInToFirebaseWithGoogle,
+  signOutFromFirebase,
+} from '../firebaseClient';
 
 export default function ChatbotTab() {
   const [messages, setMessages] = useState([
@@ -20,7 +26,22 @@ export default function ChatbotTab() {
   const [diseaseHistory, setDiseaseHistory] = useState([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [gardenContext, setGardenContext] = useState(null);
+  const [authState, setAuthState] = useState({ loading: true, user: null, error: '' });
+  const [authBusy, setAuthBusy] = useState(false);
   const chatContainerRef = useRef(null);
+
+  useEffect(() => {
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = observeFirebaseUser(
+        (user) => setAuthState({ loading: false, user, error: '' }),
+        (error) => setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) }),
+      );
+    } catch (error) {
+      setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) });
+    }
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -91,6 +112,10 @@ export default function ChatbotTab() {
   const sendMessage = async (messageText) => {
     const text = String(messageText || '').trim();
     if (!text || isLoading) return;
+    if (!authState.user) {
+      setAuthState((current) => ({ ...current, error: 'Bạn cần đăng nhập Google để sử dụng trợ lý AI.' }));
+      return;
+    }
 
     const userMessage = { id: Date.now(), sender: 'user', text };
     setMessages((prev) => [...prev, userMessage]);
@@ -99,23 +124,52 @@ export default function ChatbotTab() {
 
     try {
       const conversation = messages
-        .filter((item) => item.id !== 1)
-        .slice(-10)
+        .filter((item) => item.id !== 1 && !item.isError)
+        .slice(-20)
         .map((item) => ({
-          role: item.sender === 'user' ? 'user' : 'assistant',
-          content: item.text,
+          role: item.sender === 'user' ? 'user' : 'model',
+          text: item.text,
         }));
       const response = await sendChatMessage(userMessage.text, gardenContext, conversation);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: 'bot',
-          text: response?.reply || response?.error || 'Xin lỗi, tôi đang gặp sự cố kết nối. Vui lòng thử lại sau.',
-        },
-      ]);
+      setMessages((prev) => {
+        const priorMessages = response?.reply
+          ? prev
+          : prev.map((item) => item.id === userMessage.id ? { ...item, isError: true } : item);
+        return [
+          ...priorMessages,
+          {
+            id: Date.now() + 1,
+            sender: 'bot',
+            text: response?.reply || response?.error || 'Firebase không trả lời. Vui lòng thử lại sau.',
+            isError: !response?.reply,
+          },
+        ];
+      });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setAuthBusy(true);
+    setAuthState((current) => ({ ...current, error: '' }));
+    try {
+      await signInToFirebaseWithGoogle();
+    } catch (error) {
+      setAuthState((current) => ({ ...current, error: describeFirebaseChatError(error) }));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthBusy(true);
+    try {
+      await signOutFromFirebase();
+    } catch (error) {
+      setAuthState((current) => ({ ...current, error: describeFirebaseChatError(error) }));
+    } finally {
+      setAuthBusy(false);
     }
   };
 
@@ -148,7 +202,30 @@ export default function ChatbotTab() {
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-900 font-display">Trợ lý AI Thực vật</h2>
-          <p className="text-sm text-slate-500">Sẵn sàng giải đáp mọi thắc mắc của bạn</p>
+          <p className="text-sm text-slate-500">{authState.user?.email || 'Đăng nhập Firebase để bắt đầu chat'}</p>
+        </div>
+        <div className="ml-auto">
+          {authState.user ? (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={authBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              Đăng xuất
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={authBusy || authState.loading}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {authBusy || authState.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              Đăng nhập Google
+            </button>
+          )}
         </div>
       </div>
 
@@ -215,6 +292,22 @@ export default function ChatbotTab() {
       </section>
 
       <div ref={chatContainerRef} className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4 custom-scrollbar">
+        {!authState.user && !authState.loading && (
+          <div className="mx-auto max-w-lg rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
+            <p className="text-sm font-semibold text-slate-800">Đăng nhập để dùng chatbot Firebase</p>
+            <p className="mt-1 text-xs text-slate-600">Web dùng Google Sign-In cùng Firebase project với app Flutter. Function vẫn giữ yêu cầu xác thực.</p>
+            {authState.error && <p className="mt-3 text-sm text-rose-700">{authState.error}</p>}
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={authBusy}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              Đăng nhập Google
+            </button>
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -229,7 +322,9 @@ export default function ChatbotTab() {
             </div>
             <div
               className={`max-w-full px-4 py-3 rounded-2xl text-sm shadow-sm ${
-                msg.sender === 'user'
+                msg.isError
+                  ? 'bg-rose-50 text-rose-700 rounded-bl-none border border-rose-200'
+                  : msg.sender === 'user'
                   ? 'bg-emerald-500 text-white rounded-br-none'
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'
               }`}
@@ -256,12 +351,13 @@ export default function ChatbotTab() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Nhập câu hỏi của bạn..."
+          placeholder={authState.user ? 'Nhập câu hỏi về cây trồng...' : 'Đăng nhập Google để chat'}
+          disabled={!authState.user || authState.loading || isLoading}
           className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-4 py-3 pr-12 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all shadow-sm"
         />
         <button
           type="submit"
-          disabled={!input.trim() || isLoading}
+          disabled={!input.trim() || isLoading || !authState.user}
           className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-600 transition-colors"
         >
           <Send className="w-4 h-4" />

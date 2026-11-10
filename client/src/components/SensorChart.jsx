@@ -38,23 +38,40 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function SensorChart({ history, selectedZone }) {
-  // Plot every retained Firebase reading; grouping by time hid the rapid samples.
+  // Plot every retained Firebase reading; forward-fill transient missing sensor reads (e.g. DHT timeouts)
   const chartData = useMemo(() => {
     if (!history || history.length === 0) return [];
+
+    let lastTemp = null;
+    let lastHum = null;
+    let lastLight = null;
+    let lastSoil = null;
 
     return [...history]
       .filter((row) => row.timestamp !== null && row.timestamp !== undefined && row.timestamp !== '' && Number.isFinite(Number(row.timestamp)))
       .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
-      .map((row) => ({
-        timestamp: Number(row.timestamp),
-        time: new Date(Number(row.timestamp)).toLocaleTimeString('vi-VN', {
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
-        }),
-        'Nhiệt độ': row.temperature,
-        'Độ ẩm KK': row.humidity,
-        'Ánh sáng': row.light,
-        'Độ ẩm đất': row.soil_moisture,
-      }));
+      .map((row) => {
+        const temp = row.temperature != null ? Number(row.temperature) : lastTemp;
+        const hum = row.humidity != null ? Number(row.humidity) : lastHum;
+        const light = row.light != null ? Number(row.light) : lastLight;
+        const soil = row.soil_moisture != null ? Number(row.soil_moisture) : lastSoil;
+
+        if (temp != null) lastTemp = temp;
+        if (hum != null) lastHum = hum;
+        if (light != null) lastLight = light;
+        if (soil != null) lastSoil = soil;
+
+        return {
+          timestamp: Number(row.timestamp),
+          time: new Date(Number(row.timestamp)).toLocaleTimeString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          }),
+          'Nhiệt độ': temp,
+          'Độ ẩm KK': hum,
+          'Ánh sáng': light,
+          'Độ ẩm đất': soil,
+        };
+      });
   }, [history]);
 
   if (chartData.length === 0) {
@@ -112,7 +129,8 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Nhiệt độ"
-                connectNulls={false}
+                unit="°C"
+                connectNulls={true}
                 stroke="#f43f5e"
                 strokeWidth={2}
                 fill="url(#gradTemp)"
@@ -121,7 +139,8 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Độ ẩm KK"
-                connectNulls={false}
+                unit="%"
+                connectNulls={true}
                 stroke="#06b6d4"
                 strokeWidth={2}
                 fill="url(#gradHumid)"
@@ -177,7 +196,8 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Ánh sáng"
-                connectNulls={false}
+                unit=" lux"
+                connectNulls={true}
                 stroke="#fbbf24"
                 strokeWidth={2}
                 fill="url(#gradLight)"
@@ -186,7 +206,8 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Độ ẩm đất"
-                connectNulls={false}
+                unit="%"
+                connectNulls={true}
                 stroke="#10b981"
                 strokeWidth={2}
                 fill="url(#gradSoil)"

@@ -1,3 +1,5 @@
+import { callAskChatbot, describeFirebaseChatError } from './firebaseClient';
+
 const API_BASE = '/api';
 
 /**
@@ -132,22 +134,37 @@ export async function fetchPestHistory(days = 30) {
   return result?.data || [];
 }
 
-/** Send a chat turn and current garden context to the Firebase Gemini service. */
+/** Call the authenticated Firebase askChatbot callable with prior turns. */
 export async function sendChatMessage(message, context = null, history = []) {
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, context, history })
-    });
-    const result = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { error: result.error || `Không gọi được trợ lý AI (HTTP ${res.status}).` };
+    const cleanMessage = String(message || '').trim();
+    if (!cleanMessage) return { error: 'Bạn hãy nhập câu hỏi về cây trồng.' };
+    if (cleanMessage.length > 4000) return { error: 'Câu hỏi quá dài (tối đa 4.000 ký tự).' };
+
+    const contextPrefix = '\n\nNgữ cảnh cảm biến, bơm và lịch sử bệnh từ Firebase (tham khảo):\n';
+    const contextText = context && typeof context === 'object' ? JSON.stringify(context) : '';
+    const availableContextLength = Math.max(0, 4000 - cleanMessage.length - contextPrefix.length);
+    const text = contextText && availableContextLength > 0
+      ? `${cleanMessage}${contextPrefix}${contextText.slice(0, availableContextLength)}`
+      : cleanMessage;
+
+    const normalizedHistory = (Array.isArray(history) ? history : [])
+      .map((item) => ({
+        role: item?.role === 'assistant' || item?.role === 'model' ? 'model' : item?.role,
+        text: String(item?.text ?? item?.content ?? '').trim(),
+      }))
+      .filter((item) => ['user', 'model'].includes(item.role) && item.text && item.text.length <= 4000)
+      .slice(-20);
+
+    const result = await callAskChatbot({ text, history: normalizedHistory });
+    const reply = result?.data?.reply;
+    if (typeof reply !== 'string' || !reply.trim()) {
+      return { error: 'Firebase Function askChatbot không trả về câu trả lời hợp lệ.' };
     }
-    return result;
-  } catch (err) {
-    console.error('[API] /chat:', err.message);
-    return { error: 'Không kết nối được máy chủ chatbot. Kiểm tra kết nối mạng rồi thử lại.' };
+    return { reply: reply.trim() };
+  } catch (error) {
+    console.error('[Firebase askChatbot]', error?.code || error?.message || error);
+    return { error: describeFirebaseChatError(error) };
   }
 }
 

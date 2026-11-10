@@ -62,7 +62,7 @@ Smart_Plant/
 | OS         | Ubuntu / Raspberry Pi OS (64-bit) |
 | C++        | GCC ≥ 10 (hỗ trợ C++17)           |
 | CMake      | ≥ 3.16                            |
-| Node.js    | ≥ 18 (khuyến nghị v20 LTS)        |
+| Node.js    | ≥ 24.12 (Firebase Web SDK + Vite)  |
 | npm        | ≥ 8                               |
 
 ### Kiểm tra phiên bản
@@ -84,8 +84,8 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 export NVM_DIR="$HOME/.nvm"
 source "$NVM_DIR/nvm.sh"
 
-# Cài Node.js 20 LTS
-nvm install 20
+# Cài Node.js 24 LTS
+nvm install 24
 ```
 
 ---
@@ -138,6 +138,8 @@ FIREBASE_DATABASE_URL=https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebas
 FIREBASE_ENABLED=true
 GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 ```
+
+Chatbot web gọi Firebase Callable Function `askChatbot` trực tiếp bằng Firebase Web SDK tại vùng `asia-southeast1`. Web dùng cùng Firebase project và Google Sign-In như app Flutter; Firebase SDK tự đính kèm Auth token. Cấu hình Firebase Web trong `client/src/firebaseClient.js` là thông tin client công khai; không đặt `GEMINI_API_KEY` ở web, Vite hay Pi. Trong Firebase Console, cần bật Google provider và thêm hostname web của Pi vào **Authentication → Settings → Authorized domains**. Function `askChatbot` phải được deploy tại `asia-southeast1` và gắn Secret `GEMINI_API_KEY`.
 
 Dashboard đọc số đo cảm biến và lịch sử từ Realtime Database tại `/{node}/sensor`
 và `/{node}/history` qua API của webserver. `FIREBASE_ENABLED=true` bật gateway
@@ -303,12 +305,6 @@ Trên chính Pi: `http://localhost:3000`
 | `GET`  | `/api/zones/:id` | Chi tiết khu vực  |
 | `POST` | `/api/zones`     | Tạo khu vực mới   |
 | `PUT`  | `/api/zones/:id` | Cập nhật khu vực  |
-
-### Chat API
-
-| Method | Endpoint    | Mô tả                                                     |
-| ------ | ----------- | --------------------------------------------------------- |
-| `POST` | `/api/chat` | Gửi tin nhắn, lịch sử hội thoại và ngữ cảnh cảm biến/bơm Firebase cho Trợ lý AI |
 
 ### Ví dụ gửi dữ liệu bằng curl
 
