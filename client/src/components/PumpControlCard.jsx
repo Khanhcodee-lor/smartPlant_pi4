@@ -49,10 +49,10 @@ export default function PumpControlCard() {
           : 'Bơm đang tắt · thủ công';
 
   return (
-    <section className="glass-panel p-5 sm:p-6">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+    <section className="glass-panel p-4 sm:px-5 sm:py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 text-white shadow-lg shadow-cyan-500/20">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700">
             <Droplets className="h-5 w-5" />
           </div>
           <div>
@@ -72,7 +72,7 @@ export default function PumpControlCard() {
             onClick={() => sendCommand('auto')}
             disabled={Boolean(pendingCommand)}
             aria-pressed={isAuto}
-            className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${isAuto ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}
+            className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${isAuto ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}
           >
             {pendingCommand === 'auto' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Tự động
@@ -82,7 +82,7 @@ export default function PumpControlCard() {
             onClick={() => sendCommand('on')}
             disabled={Boolean(pendingCommand)}
             aria-pressed={!isAuto && isOn}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
           >
             {pendingCommand === 'on' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
             Bật bơm
@@ -92,7 +92,7 @@ export default function PumpControlCard() {
             onClick={() => sendCommand('off')}
             disabled={Boolean(pendingCommand)}
             aria-pressed={!isAuto && !isOn}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-wait disabled:opacity-60"
           >
             {pendingCommand === 'off' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
             Tắt bơm

@@ -88,7 +88,7 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-          <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <div className="max-w-[1480px] w-full mx-auto px-4 sm:px-5 lg:px-6 py-4 sm:py-5">
 
         {/* Loading Skeleton */}
         {loading ? (
@@ -96,10 +96,10 @@ export default function App() {
         ) : (
           <>
             {activeTab === 'dashboard' && (
-              <div className="space-y-8 sm:space-y-10 animate-fade-in-up">
+              <div className="space-y-5 animate-fade-in-up">
                 {/* Stat Cards Row */}
                 <section>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     <StatCard
                       icon={Thermometer}
                       label="Nhiệt độ"
@@ -138,20 +138,20 @@ export default function App() {
                 <PumpControlCard />
 
                 {/* Charts Section */}
-                <section className="glass-panel p-6 sm:p-8 animate-fade-in-up" style={{ animationDelay: '400ms' }}>
+                <section className="glass-panel p-4 sm:p-5 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
                   <SensorChart history={sensorHistory} />
                 </section>
 
                 {/* Main Layout Grid */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-5">
                   {/* Left Column: Zones (Takes up 2/3 width on large screens) */}
-                  <section className="xl:col-span-2 space-y-6 animate-fade-in-up" style={{ animationDelay: '500ms' }}>
+                  <section className="xl:col-span-2 space-y-4 animate-fade-in-up" style={{ animationDelay: '400ms' }}>
                     <div className="flex items-center justify-between px-2">
                       <div>
-                        <h2 className="text-xl font-display font-bold text-slate-900 tracking-tight">Node cảm biến</h2>
-                        <p className="text-sm text-slate-500 mt-1">Dữ liệu cảm biến trực tiếp từ Firebase Realtime Database</p>
+                        <h2 className="text-lg font-display font-bold text-slate-900 tracking-tight">Node cảm biến</h2>
+                        <p className="text-xs text-slate-500 mt-1">Số đo mới nhất từ Firebase Realtime Database</p>
                       </div>
-                      <span className="text-xs font-semibold text-emerald-600 bg-emerald-500/10 px-4 py-1.5 rounded-full border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
                         {zones.length} node
                       </span>
                     </div>
@@ -162,7 +162,7 @@ export default function App() {
                         <p className="mt-2 text-sm text-slate-500">Dữ liệu sẽ xuất hiện khi Firebase nhận được bản ghi từ node cảm biến.</p>
                       </div>
                     )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       {zones.map((zone, i) => (
                         <ZoneCard key={zone.id} zone={zone} delay={600 + (i * 100)} />
                       ))}
@@ -170,11 +170,11 @@ export default function App() {
                   </section>
 
                   {/* Right Column: Pest Table */}
-                  <section className="xl:col-span-1 space-y-6 animate-fade-in-up" style={{ animationDelay: '600ms' }}>
+                  <section className="xl:col-span-1 space-y-4 animate-fade-in-up" style={{ animationDelay: '500ms' }}>
                     <div className="flex items-center justify-between px-2">
                       <div>
-                        <h2 className="text-xl font-display font-bold text-slate-900 tracking-tight">Nhật ký sâu bệnh</h2>
-                        <p className="text-sm text-slate-500 mt-1">Phát hiện gần đây nhất</p>
+                        <h2 className="text-lg font-display font-bold text-slate-900 tracking-tight">Nhật ký sâu bệnh</h2>
+                        <p className="text-xs text-slate-500 mt-1">Phát hiện gần đây nhất</p>
                       </div>
                     </div>
                     <div className="h-full">
@@ -194,7 +194,7 @@ export default function App() {
             )}
 
             {activeTab !== 'chat' && (
-              <footer className="text-center py-8 pt-12">
+              <footer className="text-center py-5 pt-7">
                 <p className="mb-2 text-sm font-medium text-slate-500 font-display">
                   Smart Plant Dashboard — Powered by Raspberry Pi 4
                 </p>

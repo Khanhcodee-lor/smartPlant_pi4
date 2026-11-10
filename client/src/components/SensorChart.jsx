@@ -66,18 +66,18 @@ export default function SensorChart({ history, selectedZone }) {
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
       {/* Temperature & Humidity Chart */}
       <div>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
-              🌡️ Nhiệt độ & Độ ẩm không khí
+            <h3 className="text-base font-semibold text-slate-900 font-display tracking-tight">
+              Nhiệt độ & độ ẩm không khí
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{chartData.length} lần đo Firebase gần nhất</p>
+            <p className="text-xs text-slate-500 mt-1">{chartData.length} lần đo gần nhất</p>
           </div>
         </div>
-        <div className="h-[280px] sm:h-[320px] w-full">
+        <div className="h-[230px] sm:h-[250px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
               <defs>
@@ -107,25 +107,25 @@ export default function SensorChart({ history, selectedZone }) {
                 dx={-10}
               />
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(0,0,0,0.05)', strokeWidth: 1, strokeDasharray: '4 4' }} />
-              <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" iconSize={8} />
+              <Legend wrapperStyle={{ paddingTop: '10px' }} iconType="circle" iconSize={7} />
               
               <Area
                 type="monotone"
                 dataKey="Nhiệt độ"
                 connectNulls={false}
                 stroke="#f43f5e"
-                strokeWidth={3}
+                strokeWidth={2}
                 fill="url(#gradTemp)"
-                activeDot={{ r: 6, fill: '#f43f5e', stroke: '#ffffff', strokeWidth: 3 }}
+                activeDot={{ r: 5, fill: '#f43f5e', stroke: '#ffffff', strokeWidth: 2 }}
               />
               <Area
                 type="monotone"
                 dataKey="Độ ẩm KK"
                 connectNulls={false}
                 stroke="#06b6d4"
-                strokeWidth={3}
+                strokeWidth={2}
                 fill="url(#gradHumid)"
-                activeDot={{ r: 6, fill: '#06b6d4', stroke: '#ffffff', strokeWidth: 3 }}
+                activeDot={{ r: 5, fill: '#06b6d4', stroke: '#ffffff', strokeWidth: 2 }}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -134,15 +134,15 @@ export default function SensorChart({ history, selectedZone }) {
 
       {/* Light & Soil Moisture Chart */}
       <div>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
-              ☀️ Ánh sáng & Độ ẩm đất
+            <h3 className="text-base font-semibold text-slate-900 font-display tracking-tight">
+              Ánh sáng & độ ẩm đất
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{chartData.length} lần đo Firebase gần nhất</p>
+            <p className="text-xs text-slate-500 mt-1">{chartData.length} lần đo gần nhất</p>
           </div>
         </div>
-        <div className="h-[280px] sm:h-[320px] w-full">
+        <div className="h-[230px] sm:h-[250px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
               <defs>
@@ -172,25 +172,25 @@ export default function SensorChart({ history, selectedZone }) {
                 dx={-10}
               />
               <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(0,0,0,0.05)', strokeWidth: 1, strokeDasharray: '4 4' }} />
-              <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" iconSize={8} />
+              <Legend wrapperStyle={{ paddingTop: '10px' }} iconType="circle" iconSize={7} />
               
               <Area
                 type="monotone"
                 dataKey="Ánh sáng"
                 connectNulls={false}
                 stroke="#fbbf24"
-                strokeWidth={3}
+                strokeWidth={2}
                 fill="url(#gradLight)"
-                activeDot={{ r: 6, fill: '#fbbf24', stroke: '#ffffff', strokeWidth: 3 }}
+                activeDot={{ r: 5, fill: '#fbbf24', stroke: '#ffffff', strokeWidth: 2 }}
               />
               <Area
                 type="monotone"
                 dataKey="Độ ẩm đất"
                 connectNulls={false}
                 stroke="#10b981"
-                strokeWidth={3}
+                strokeWidth={2}
                 fill="url(#gradSoil)"
-                activeDot={{ r: 6, fill: '#10b981', stroke: '#ffffff', strokeWidth: 3 }}
+                activeDot={{ r: 5, fill: '#10b981', stroke: '#ffffff', strokeWidth: 2 }}
               />
             </AreaChart>
           </ResponsiveContainer>

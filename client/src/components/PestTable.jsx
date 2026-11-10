@@ -4,11 +4,11 @@ export default function PestTable({ pests }) {
   if (!pests || pests.length === 0) {
     return (
       <div className="glass-panel p-8 h-full flex flex-col items-center justify-center text-center animate-fade-in-up">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4 border border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-          <ShieldCheck className="w-8 h-8 text-emerald-400" />
+        <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mb-3 border border-emerald-100">
+          <ShieldCheck className="w-6 h-6 text-emerald-600" />
         </div>
-        <h3 className="text-lg font-bold text-slate-900 mb-2 font-display">Khu vườn an toàn</h3>
-        <p className="text-sm text-slate-500 font-medium">Hệ thống AI không phát hiện bất kỳ dấu hiệu sâu bệnh nào.</p>
+        <h3 className="text-base font-bold text-slate-900 mb-1 font-display">Khu vườn an toàn</h3>
+        <p className="text-xs text-slate-500">Chưa phát hiện dấu hiệu sâu bệnh.</p>
       </div>
     );
   }
@@ -104,19 +104,19 @@ export default function PestTable({ pests }) {
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">
-              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
+              <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 px-2.5 font-display">
                 Thời gian
               </th>
-              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
+              <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 px-2.5 font-display">
                 Khu vực
               </th>
-              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
+              <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 px-2.5 font-display">
                 Loại sâu bệnh
               </th>
-              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
+              <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 px-2.5 font-display">
                 Mức độ
               </th>
-              <th className="text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest py-4 px-4 font-display">
+              <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 px-2.5 font-display">
                 Độ tin cậy
               </th>
             </tr>
@@ -130,15 +130,15 @@ export default function PestTable({ pests }) {
                   key={pest.id || i}
                   className="border-b border-slate-200 hover:bg-slate-50/80 transition-colors group cursor-default"
                 >
-                  <td className="py-4 px-4">
+                  <td className="py-2.5 px-2.5">
                     <span className="text-xs font-semibold text-slate-500 group-hover:text-slate-700 transition-colors">{formatTime(pest.timestamp)}</span>
                   </td>
-                  <td className="py-4 px-4">
+                  <td className="py-2.5 px-2.5">
                     <span className="text-xs font-bold text-slate-900 tracking-wide">
                       {pest.zone_name || '—'}
                     </span>
                   </td>
-                  <td className="py-4 px-4">
+                  <td className="py-2.5 px-2.5">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-md bg-amber-100 flex items-center justify-center border border-amber-200">
                         <Bug className="w-3.5 h-3.5 text-amber-500" />
@@ -146,7 +146,7 @@ export default function PestTable({ pests }) {
                       <span className="text-xs font-bold text-slate-900 tracking-wide">{pest.pest_type}</span>
                     </div>
                   </td>
-                  <td className="py-4 px-4">
+                  <td className="py-2.5 px-2.5">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${sev.bg} ${sev.text} ${sev.border} ${sev.shadow}`}
                     >
@@ -154,7 +154,7 @@ export default function PestTable({ pests }) {
                       {sev.label}
                     </span>
                   </td>
-                  <td className="py-4 px-4">
+                  <td className="py-2.5 px-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden w-full max-w-[80px] border border-slate-300 shadow-inner">
                         <div

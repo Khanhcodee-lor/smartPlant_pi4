@@ -10,7 +10,7 @@ export default function Sidebar({ activeTab, onTabChange, isCollapsed, setIsColl
   return (
     <aside
       className={`relative hidden md:flex flex-col h-full bg-white border-r border-slate-200 shadow-sm z-40 shrink-0 ${
-        isCollapsed ? 'w-20' : 'w-64'
+        isCollapsed ? 'w-16' : 'w-56'
       }`}
     >
       {/* Floating Collapse Button */}
@@ -22,7 +22,7 @@ export default function Sidebar({ activeTab, onTabChange, isCollapsed, setIsColl
       </button>
 
       {/* Navigation Links */}
-      <div className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar mt-2">
+      <div className="flex-1 py-4 px-2.5 space-y-1.5 overflow-y-auto custom-scrollbar mt-1">
         {menuItems.map((item) => {
           const isActive = activeTab === item.id;
           const Icon = item.icon;
@@ -31,7 +31,7 @@ export default function Sidebar({ activeTab, onTabChange, isCollapsed, setIsColl
               key={item.id}
               onClick={() => onTabChange(item.id)}
               title={isCollapsed ? item.label : ''}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold group ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold group ${
                 isActive
                   ? 'bg-emerald-50 text-emerald-600 shadow-sm ring-1 ring-emerald-500/20'
                   : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
