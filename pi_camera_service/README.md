@@ -1,8 +1,10 @@
 # Smart Plant Raspberry Pi Capture Service
 
 Service này chạy trên Raspberry Pi, polling `plants/{PLANT_ID}/commands/capture`,
-lấy ảnh JPEG từ endpoint `/snapshot` của ustreamer, phân tích ảnh, upload Storage và ghi kết quả vào
-`plants/{PLANT_ID}/plant_captures/{request_id}`. `request_id` là khóa idempotency:
+lấy ảnh JPEG từ endpoint `/snapshot` của ustreamer, phân tích ảnh, upload Storage và ghi trạng thái/kết quả xử lý vào RTDB tại
+`plants/{PLANT_ID}/plant_captures/{request_id}`. Kết quả phân tích cũng được mirror sang Firestore tại
+`plants/{PLANT_ID}/plant_captures/{request_id}` để lịch sử bệnh trên web và AI cùng đọc từ Firestore.
+`request_id` là khóa idempotency:
 capture đã có `status=completed` sẽ không bị chụp lại sau restart. Trạng thái
 Firebase là nguồn bền vững; file local chỉ chứa ảnh để retry/điều tra, không tự
 động xóa ảnh cũ.

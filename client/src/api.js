@@ -140,11 +140,14 @@ export async function sendChatMessage(message, context = null, history = []) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, context, history })
     });
-    if (!res.ok) throw new Error('Chat API Error');
-    return await res.json();
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: result.error || `Không gọi được trợ lý AI (HTTP ${res.status}).` };
+    }
+    return result;
   } catch (err) {
     console.error('[API] /chat:', err.message);
-    return null;
+    return { error: 'Không kết nối được máy chủ chatbot. Kiểm tra kết nối mạng rồi thử lại.' };
   }
 }
 

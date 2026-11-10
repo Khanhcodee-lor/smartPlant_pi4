@@ -151,7 +151,7 @@ node). Điều khiển bơm đọc/ghi tại `plant/{PLANT_ID}/control/pump` (m�
 thủ công ghi `mode`, `enabled`, `manual_override`, `updated_at`, `updated_ts` và
 `updated_by=web` để bộ điều khiển thiết bị nhận lệnh.
 
-Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` sẽ nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật kết quả. Ứng dụng theo dõi `GET /api/camera/capture/{request_id}` để hiển thị ảnh. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
+Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào RTDB `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật trạng thái/kết quả RTDB tại `plants/{PLANT_ID}/plant_captures/{request_id}` để app theo dõi. Kết quả phân tích cũng được mirror sang Firestore cùng đường dẫn để lịch sử bệnh và trợ lý AI trên web đọc qua `/api/pests/history`. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
 
 Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`. Web server Node.js do `smart-plant-engine` khởi chạy và quản lý; script cập nhật sẽ xóa tiến trình PM2 `smart-plant-server` cũ nếu còn sót rồi restart engine. Không chạy thêm Node server riêng bằng PM2 vì sẽ tranh cổng 3000. Dữ liệu được ghi như sau:
 

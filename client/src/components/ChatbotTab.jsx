@@ -36,8 +36,10 @@ export default function ChatbotTab() {
       const detectedDiseases = (Array.isArray(history) ? history : [])
         .filter((item) => {
           const pestType = String(item.pest_type || '').trim();
-          const isHealthy = /healthy|cây khỏe mạnh/i.test(pestType);
-          const isDetected = item.status === 'detected' || (!item.status && pestType);
+          const isHealthy = /healthy|no disease|no detection|không phát hiện|không bệnh|không có bệnh|khỏe mạnh/i.test(pestType);
+          const status = String(item.status || '').toLowerCase();
+          const isDetected = ['detected', 'completed', 'complete', 'success'].includes(status)
+            || (!status && pestType);
           return isDetected && !isHealthy;
         })
         .slice(0, 10);
@@ -109,7 +111,7 @@ export default function ChatbotTab() {
         {
           id: Date.now() + 1,
           sender: 'bot',
-          text: response?.reply || 'Xin lỗi, tôi đang gặp sự cố kết nối. Vui lòng thử lại sau.',
+          text: response?.reply || response?.error || 'Xin lỗi, tôi đang gặp sự cố kết nối. Vui lòng thử lại sau.',
         },
       ]);
     } finally {

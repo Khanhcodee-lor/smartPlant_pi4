@@ -360,7 +360,15 @@ async function syncSqliteRowToFirebase(db, firestore, row) {
 function mapFirebaseCapture(doc, zoneNames) {
   const record = doc.data();
   const capturedAt = getCaptureDate(record);
-  const status = record.status || (record.pest_type ? 'detected' : 'no_detection');
+  const pestType = String(record.pest_type || record.disease_class || record.diseaseClass || '').trim();
+  const normalizedStatus = String(record.status || '').trim().toLowerCase();
+  const isHealthy = /healthy|no disease|no detection|không phát hiện|không bệnh|không có bệnh|khỏe mạnh/i.test(pestType);
+  // The mobile-app analysis listener stores `status: completed` to signal that
+  // processing finished. Convert that workflow state into a history result so
+  // the dashboard and chatbot can recognize the disease label.
+  const status = ['completed', 'complete', 'success'].includes(normalizedStatus)
+    ? (pestType && !isHealthy ? 'detected' : 'no_detection')
+    : normalizedStatus || (pestType && !isHealthy ? 'detected' : 'no_detection');
   const confidence = record.confidence;
   return {
     id: doc.id,
@@ -369,7 +377,7 @@ function mapFirebaseCapture(doc, zoneNames) {
     firebase_capture_id: doc.id,
     source: record.source || null,
     status,
-    pest_type: record.pest_type || null,
+    pest_type: pestType || null,
     confidence: confidence !== null && confidence !== undefined && confidence !== '' &&
       Number.isFinite(Number(confidence)) ? Number(confidence) : null,
     image_path: record.annotated_image_url || record.original_image_url || record.image_path || null,

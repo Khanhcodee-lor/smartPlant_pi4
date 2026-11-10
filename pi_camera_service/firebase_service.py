@@ -67,6 +67,58 @@ class FirebaseService:
             f"plants/{self.config.plant_id}/plant_captures/{capture_id}"
         ).set(data)
 
+        if self._firestore is None:
+            return
+
+        detections = data.get("detections")
+        first_detection = detections[0] if isinstance(detections, list) and detections else {}
+        disease_class = str(
+            first_detection.get("disease_class") or data.get("diseaseClass") or ""
+        ).strip()
+        normalized_disease = disease_class.lower()
+        has_disease = bool(disease_class) and not any(
+            marker in normalized_disease
+            for marker in ("healthy", "no disease", "no detection", "không phát hiện", "cây khỏe mạnh")
+        )
+
+        captured_at_iso = str(data.get("captured_at") or _utc_now())
+        try:
+            captured_at = datetime.fromisoformat(
+                captured_at_iso.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+        except ValueError:
+            captured_at = datetime.now(timezone.utc)
+            captured_at_iso = captured_at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+        firestore_record = {
+            **data,
+            "capture_id": capture_id,
+            "plant_id": self.config.plant_id,
+            "source": "camera",
+            "status": "detected" if has_disease else "no_detection",
+            "captured_at": captured_at,
+            "captured_at_iso": captured_at_iso,
+            "pest_type": disease_class if has_disease else None,
+            "confidence": first_detection.get("confidence") if has_disease else None,
+            "image_path": data.get("image_path"),
+            "original_storage_path": data.get("image_path"),
+            "original_image_url": data.get("snapshot_url") or data.get("snapshotUrl"),
+        }
+
+        try:
+            plant_ref = self._firestore.collection("plants").document(self.config.plant_id)
+            plant_ref.set({"plant_id": self.config.plant_id, "name": self.config.plant_id}, merge=True)
+            plant_ref.collection("plant_captures").document(capture_id).set(firestore_record)
+        except Exception as exc:
+            # RTDB remains available to finish the capture; Firestore backs history/AI context.
+            import logging
+
+            logging.getLogger("smart_plant_pi").warning(
+                "Could not mirror camera capture to Firestore request_id=%s: %s",
+                capture_id,
+                exc,
+            )
+
     def upload_image(self, image_path: Path, storage_path: str) -> str:
         """Upload an image and return a resolvable Storage path."""
         if image_path.stat().st_size > self.config.max_image_bytes:
