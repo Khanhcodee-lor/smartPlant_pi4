@@ -26,7 +26,8 @@ function getFirebaseServices() {
   // New Firebase projects use *.firebasestorage.app by default. Override this
   // with the exact bucket name shown in Firebase Console → Storage if needed.
   const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`;
-  const databaseURL = process.env.FIREBASE_DATABASE_URL;
+  const databaseURL = process.env.FIREBASE_DATABASE_URL ||
+    'https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app';
   let app = getApps().find(item => item.name === APP_NAME);
   if (!app) {
     const options = {
@@ -41,7 +42,7 @@ function getFirebaseServices() {
   return {
     firestore: getFirestore(app),
     bucket: getStorage(app).bucket(storageBucket),
-    database: databaseURL ? getDatabase(app) : null,
+    database: getDatabase(app),
     FieldValue,
     Timestamp,
     getDownloadURL

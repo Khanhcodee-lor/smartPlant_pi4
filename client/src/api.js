@@ -25,6 +25,12 @@ export async function fetchSensorLatest() {
   return result?.data || null;
 }
 
+/** Live sensor readings and history mirrored by the ESP32 gateway in Firebase RTDB. */
+export async function fetchFirebaseSensorData(hours = 24) {
+  const result = await apiFetch(`/sensors/firebase?hours=${hours}`);
+  return result?.data || null;
+}
+
 /** Latest sensor for each zone — GET /api/sensors/latest-by-zone */
 export async function fetchSensorsByZone() {
   const result = await apiFetch('/sensors/latest-by-zone');

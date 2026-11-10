@@ -134,9 +134,15 @@ Backend dùng Firebase Admin SDK để lưu ảnh trong Cloud Storage for Fireba
 ```dotenv
 FIREBASE_PROJECT_ID=pi4-iot-1b7bb
 FIREBASE_STORAGE_BUCKET=pi4-iot-1b7bb.firebasestorage.app
-FIREBASE_DATABASE_URL=https://<project>-default-rtdb.<region>.firebasedatabase.app
+FIREBASE_DATABASE_URL=https://pi4-iot-1b7bb-default-rtdb.asia-southeast1.firebasedatabase.app
+FIREBASE_ENABLED=true
 GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 ```
+
+Dashboard đọc số đo cảm biến và lịch sử từ Realtime Database tại `/{node}/sensor`
+và `/{node}/history` qua API của webserver. `FIREBASE_ENABLED=true` bật gateway
+đẩy các số đo mới lên Firebase; service account ở `GOOGLE_APPLICATION_CREDENTIALS`
+cần có quyền đọc/ghi Realtime Database.
 
 Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` sẽ nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật kết quả. Ứng dụng theo dõi `GET /api/camera/capture/{request_id}` để hiển thị ảnh. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
 

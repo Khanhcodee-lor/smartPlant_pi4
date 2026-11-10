@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Thermometer, Droplets, Sprout, Bug, LayoutDashboard, Camera as CameraIcon, Bot } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Bug } from 'lucide-react';
 
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -9,14 +9,8 @@ import ZoneCard from './components/ZoneCard';
 import PestTable from './components/PestTable';
 import CameraPestTab from './components/CameraPestTab';
 import ChatbotTab from './components/ChatbotTab';
-import WifiConfigTab from './components/WifiConfigTab';
-import BleMeshTab from './components/BleMeshTab';
-
 import {
-  fetchHealth,
-  fetchSensorLatest,
-  fetchSensorHistory,
-  fetchZones,
+  fetchFirebaseSensorData,
   fetchPestLatest,
   fetchPestStats,
 } from './api';
@@ -39,19 +33,16 @@ export default function App() {
 
   const loadAllData = useCallback(async () => {
     try {
-      const [health, sensor, history, zonesData, pests, stats] = await Promise.all([
-        fetchHealth(),
-        fetchSensorLatest(),
-        fetchSensorHistory(24),
-        fetchZones(),
+      const [firebaseSensors, pests, stats] = await Promise.all([
+        fetchFirebaseSensorData(24),
         fetchPestLatest(10),
         fetchPestStats(),
       ]);
 
-      setIsConnected(health?.status === 'ok');
-      setSensorLatest(sensor);
-      setSensorHistory(history);
-      setZones(zonesData);
+      setIsConnected(Boolean(firebaseSensors));
+      setSensorLatest(firebaseSensors?.latest || null);
+      setSensorHistory(firebaseSensors?.history || []);
+      setZones(firebaseSensors?.nodes || []);
       setPestLatest(pests);
       setPestStats(stats);
       setLastUpdate(new Date());
@@ -154,19 +145,18 @@ export default function App() {
                   <section className="xl:col-span-2 space-y-6 animate-fade-in-up" style={{ animationDelay: '500ms' }}>
                     <div className="flex items-center justify-between px-2">
                       <div>
-                        <h2 className="text-xl font-display font-bold text-slate-900 tracking-tight">Khu vực trồng trọt</h2>
-                        <p className="text-sm text-slate-500 mt-1">Tổng quan thông số các khu vực trong hệ thống</p>
+                        <h2 className="text-xl font-display font-bold text-slate-900 tracking-tight">Node cảm biến</h2>
+                        <p className="text-sm text-slate-500 mt-1">Dữ liệu cảm biến trực tiếp từ Firebase Realtime Database</p>
                       </div>
                       <span className="text-xs font-semibold text-emerald-600 bg-emerald-500/10 px-4 py-1.5 rounded-full border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-                        {zones.length} khu vực
+                        {zones.length} node
                       </span>
                     </div>
                     {zones.length === 0 && (
                       <div className="rounded-2xl border border-dashed border-emerald-200 bg-white p-8 text-center">
                         <Sprout className="mx-auto mb-3 h-9 w-9 text-emerald-500" />
-                        <h3 className="font-semibold text-slate-800">Chưa có khu vực nào</h3>
-                        <p className="mt-2 text-sm text-slate-500">Khu vực sẽ xuất hiện khi ESP32 Join Mesh và cấu hình thành công.</p>
-                        <button onClick={() => setActiveTab('ble')} className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">Thêm ESP32 vào Mesh</button>
+                        <h3 className="font-semibold text-slate-800">Chưa có dữ liệu cảm biến</h3>
+                        <p className="mt-2 text-sm text-slate-500">Dữ liệu sẽ xuất hiện khi Firebase nhận được bản ghi từ node cảm biến.</p>
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
@@ -198,14 +188,6 @@ export default function App() {
 
             {activeTab === 'chat' && (
               <ChatbotTab />
-            )}
-
-            {activeTab === 'wifi' && (
-              <WifiConfigTab />
-            )}
-
-            {activeTab === 'ble' && (
-              <BleMeshTab />
             )}
 
             {activeTab !== 'chat' && (

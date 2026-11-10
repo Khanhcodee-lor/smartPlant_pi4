@@ -1,4 +1,4 @@
-import { Thermometer, Droplets, Sprout, Activity, Bluetooth } from 'lucide-react';
+import { Thermometer, Droplets, Sprout, Activity, Sun } from 'lucide-react';
 
 export default function ZoneCard({ zone, delay = 0 }) {
   const statusConfig = {
@@ -28,8 +28,8 @@ export default function ZoneCard({ zone, delay = 0 }) {
     },
   };
 
-  const lastSeen = zone.node_last_seen ? Date.parse(zone.node_last_seen.replace(' ', 'T') + (zone.node_last_seen.endsWith('Z') ? '' : 'Z')) : 0;
-  const online = zone.node_status === 'active' && Date.now() - lastSeen < 30000;
+  const lastSeen = Number(zone.updated_at) || Date.parse(zone.updated_at) || 0;
+  const online = lastSeen > 0 && Date.now() - lastSeen < 60000;
   const status = online ? statusConfig.active : statusConfig.inactive;
 
   const metrics = [
@@ -63,10 +63,17 @@ export default function ZoneCard({ zone, delay = 0 }) {
       iconColor: 'text-emerald-500',
       max: 100,
     },
+    {
+      icon: Sun,
+      label: 'Ánh sáng',
+      value: zone.latest_light,
+      unit: ' lx',
+      color: 'bg-amber-500',
+      textColor: 'text-amber-600',
+      iconColor: 'text-amber-500',
+      max: 65535,
+    },
   ];
-
-  const hasNode = zone.node_name || zone.node_mesh_address;
-  const nodeActive = online;
 
   return (
     <div
@@ -92,25 +99,15 @@ export default function ZoneCard({ zone, delay = 0 }) {
         </span>
       </div>
 
-      {/* BLE Node Info */}
-      <div className={`mb-4 px-3 py-2.5 rounded-xl border text-xs relative z-10 ${
-        hasNode
-          ? nodeActive
-            ? 'bg-blue-50/50 border-blue-100 text-blue-700'
-            : 'bg-slate-50 border-slate-100 text-slate-500'
-          : 'bg-slate-50/50 border-dashed border-slate-200 text-slate-400'
+      {/* Firebase update status */}
+      <div className={`mb-4 flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-xs relative z-10 ${
+        online ? 'bg-emerald-50/50 border-emerald-100 text-emerald-700' : 'bg-slate-50 border-slate-100 text-slate-500'
       }`}>
         <div className="flex items-center gap-2">
-          <Bluetooth className={`w-3.5 h-3.5 shrink-0 ${hasNode ? nodeActive ? 'text-blue-500' : 'text-slate-400' : 'text-slate-300'}`} />
-          {hasNode ? (
-            <div className="flex items-center justify-between w-full">
-              <span className="font-semibold">{zone.node_name || 'ESP32 Node'}</span>
-              <span className="font-mono text-[10px] opacity-70">{zone.node_mesh_address || ''}</span>
-            </div>
-          ) : (
-            <span className="italic">Chưa gán Node ESP32</span>
-          )}
+          <Activity className={`w-3.5 h-3.5 shrink-0 ${online ? 'text-emerald-500' : 'text-slate-400'}`} />
+          <span className="font-semibold">{online ? 'Đang nhận dữ liệu Firebase' : 'Dữ liệu đã cũ'}</span>
         </div>
+        {lastSeen > 0 && <span className="shrink-0 text-[10px] opacity-75">{new Date(lastSeen).toLocaleTimeString('vi-VN')}</span>}
       </div>
 
       {/* Metrics with Progress Bars */}

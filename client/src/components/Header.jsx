@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Leaf, Wifi, WifiOff, RefreshCw, LayoutDashboard, Camera as CameraIcon, Bot } from 'lucide-react';
+import { Leaf, RefreshCw, LayoutDashboard, Camera as CameraIcon, Bot } from 'lucide-react';
 
 export default function Header({ isConnected, lastUpdate, onRefresh, activeTab, onTabChange }) {
   const [currentTime, setCurrentTime] = useState(new Date());

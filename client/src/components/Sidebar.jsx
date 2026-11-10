@@ -1,12 +1,10 @@
-import { LayoutDashboard, Camera, Bot, ChevronLeft, ChevronRight, Leaf, Wifi, Bluetooth } from 'lucide-react';
+import { LayoutDashboard, Camera, Bot, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function Sidebar({ activeTab, onTabChange, isCollapsed, setIsCollapsed }) {
   const menuItems = [
     { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
     { id: 'camera', label: 'Camera & Sâu bệnh', icon: Camera },
     { id: 'chat', label: 'Trợ lý AI', icon: Bot },
-    { id: 'wifi', label: 'Cài đặt Wi-Fi', icon: Wifi },
-    { id: 'ble', label: 'BLE Mesh', icon: Bluetooth },
   ];
 
   return (
