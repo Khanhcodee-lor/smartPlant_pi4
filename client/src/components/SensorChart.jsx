@@ -27,7 +27,7 @@ function CustomTooltip({ active, payload, label }) {
               <span className="text-slate-500 font-medium">{entry.name}</span>
             </div>
             <span className="font-bold text-slate-900 tabular-nums">
-              {typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
+              {entry.value == null ? '—' : typeof entry.value === 'number' ? entry.value.toFixed(1) : entry.value}
               <span className="text-[10px] text-slate-400 ml-0.5">{entry.unit || ''}</span>
             </span>
           </div>
@@ -38,41 +38,22 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function SensorChart({ history, selectedZone }) {
-  // Process data: aggregate by timestamp, format time labels
+  // Plot every retained Firebase reading; grouping by time hid the rapid samples.
   const chartData = useMemo(() => {
     if (!history || history.length === 0) return [];
 
-    // Group by rounded timestamp (every 30 min)
-    const grouped = {};
-    for (const row of history) {
-      const date = new Date(row.timestamp);
-      date.setMinutes(Math.round(date.getMinutes() / 30) * 30, 0, 0);
-      const key = date.toISOString();
-
-      if (!grouped[key]) {
-        grouped[key] = {
-          time: date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-          timestamp: date.getTime(),
-          temps: [],
-          humids: [],
-          lights: [],
-          soils: [],
-        };
-      }
-      if (row.temperature != null) grouped[key].temps.push(row.temperature);
-      if (row.humidity != null) grouped[key].humids.push(row.humidity);
-      if (row.light != null) grouped[key].lights.push(row.light);
-      if (row.soil_moisture != null) grouped[key].soils.push(row.soil_moisture);
-    }
-
-    return Object.values(grouped)
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map((g) => ({
-        time: g.time,
-        'Nhiệt độ': avg(g.temps),
-        'Độ ẩm KK': avg(g.humids),
-        'Ánh sáng': avg(g.lights),
-        'Độ ẩm đất': avg(g.soils),
+    return [...history]
+      .filter((row) => row.timestamp !== null && row.timestamp !== undefined && row.timestamp !== '' && Number.isFinite(Number(row.timestamp)))
+      .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+      .map((row) => ({
+        timestamp: Number(row.timestamp),
+        time: new Date(Number(row.timestamp)).toLocaleTimeString('vi-VN', {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }),
+        'Nhiệt độ': row.temperature,
+        'Độ ẩm KK': row.humidity,
+        'Ánh sáng': row.light,
+        'Độ ẩm đất': row.soil_moisture,
       }));
   }, [history]);
 
@@ -93,7 +74,7 @@ export default function SensorChart({ history, selectedZone }) {
             <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
               🌡️ Nhiệt độ & Độ ẩm không khí
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">Dữ liệu 24 giờ gần nhất</p>
+            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{chartData.length} lần đo Firebase gần nhất</p>
           </div>
         </div>
         <div className="h-[280px] sm:h-[320px] w-full">
@@ -112,6 +93,8 @@ export default function SensorChart({ history, selectedZone }) {
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="time"
+                interval="preserveStartEnd"
+                minTickGap={24}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: '#64748b', fontSize: 11 }}
@@ -129,6 +112,7 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Nhiệt độ"
+                connectNulls={false}
                 stroke="#f43f5e"
                 strokeWidth={3}
                 fill="url(#gradTemp)"
@@ -137,6 +121,7 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Độ ẩm KK"
+                connectNulls={false}
                 stroke="#06b6d4"
                 strokeWidth={3}
                 fill="url(#gradHumid)"
@@ -154,7 +139,7 @@ export default function SensorChart({ history, selectedZone }) {
             <h3 className="text-lg font-bold text-slate-900 font-display tracking-tight">
               ☀️ Ánh sáng & Độ ẩm đất
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">Dữ liệu 24 giờ gần nhất</p>
+            <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider">{chartData.length} lần đo Firebase gần nhất</p>
           </div>
         </div>
         <div className="h-[280px] sm:h-[320px] w-full">
@@ -173,6 +158,8 @@ export default function SensorChart({ history, selectedZone }) {
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="time"
+                interval="preserveStartEnd"
+                minTickGap={24}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: '#64748b', fontSize: 11 }}
@@ -190,6 +177,7 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Ánh sáng"
+                connectNulls={false}
                 stroke="#fbbf24"
                 strokeWidth={3}
                 fill="url(#gradLight)"
@@ -198,6 +186,7 @@ export default function SensorChart({ history, selectedZone }) {
               <Area
                 type="monotone"
                 dataKey="Độ ẩm đất"
+                connectNulls={false}
                 stroke="#10b981"
                 strokeWidth={3}
                 fill="url(#gradSoil)"
@@ -209,9 +198,4 @@ export default function SensorChart({ history, selectedZone }) {
       </div>
     </div>
   );
-}
-
-function avg(arr) {
-  if (!arr || arr.length === 0) return 0;
-  return Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10;
 }

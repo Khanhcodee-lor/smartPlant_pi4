@@ -9,6 +9,7 @@ import ZoneCard from './components/ZoneCard';
 import PestTable from './components/PestTable';
 import CameraPestTab from './components/CameraPestTab';
 import ChatbotTab from './components/ChatbotTab';
+import PumpControlCard from './components/PumpControlCard';
 import {
   fetchFirebaseSensorData,
   fetchPestLatest,
@@ -34,7 +35,7 @@ export default function App() {
   const loadAllData = useCallback(async () => {
     try {
       const [firebaseSensors, pests, stats] = await Promise.all([
-        fetchFirebaseSensorData(24),
+        fetchFirebaseSensorData(),
         fetchPestLatest(10),
         fetchPestStats(),
       ]);
@@ -133,6 +134,8 @@ export default function App() {
                     />
                   </div>
                 </section>
+
+                <PumpControlCard />
 
                 {/* Charts Section */}
                 <section className="glass-panel p-6 sm:p-8 animate-fade-in-up" style={{ animationDelay: '400ms' }}>

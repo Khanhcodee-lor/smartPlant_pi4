@@ -25,10 +25,33 @@ export async function fetchSensorLatest() {
   return result?.data || null;
 }
 
-/** Live sensor readings and history mirrored by the ESP32 gateway in Firebase RTDB. */
-export async function fetchFirebaseSensorData(hours = 24) {
-  const result = await apiFetch(`/sensors/firebase?hours=${hours}`);
+/** Current readings and all retained history from Firebase RTDB. */
+export async function fetchFirebaseSensorData() {
+  const result = await apiFetch('/sensors/firebase');
   return result?.data || null;
+}
+
+/** Read the current pump state from Firebase RTDB. */
+export async function fetchPumpControl() {
+  const result = await apiFetch('/sensors/pump');
+  return result?.data || null;
+}
+
+/** Send an auto/on/off command to the Firebase pump control node. */
+export async function setPumpCommand(command) {
+  try {
+    const response = await fetch(`${API_BASE}/sensors/pump`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return { success: false, error: result.error || `API Error: ${response.status}` };
+    return result;
+  } catch (err) {
+    console.error('[API] setPumpCommand:', err.message);
+    return { success: false, error: err.message };
+  }
 }
 
 /** Latest sensor for each zone — GET /api/sensors/latest-by-zone */

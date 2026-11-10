@@ -2,6 +2,59 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { getFirebaseServices } = require('../firebase');
+const DEFAULT_PLANT_ID = process.env.PLANT_ID || 'tomato_001';
+
+function normalizeFirebaseNodeKey(value) {
+  const cleaned = String(value || '').trim().replace(/[.$#\[\]\/]/g, '');
+  const numberedNode = cleaned.match(/^(node)[\s_-]*(\d+)$/i);
+  if (numberedNode) return `node${numberedNode[2]}`;
+  return cleaned.replace(/\s+/g, '_').toLowerCase();
+}
+
+// GET /api/sensors/pump — Read the current pump mode and state from Firebase.
+router.get('/pump', async (req, res) => {
+  try {
+    const { database } = getFirebaseServices();
+    const snapshot = await database.ref(`plant/${DEFAULT_PLANT_ID}/control/pump`).get();
+    res.set('Cache-Control', 'no-store');
+    res.json({ data: snapshot.val() || null });
+  } catch (err) {
+    console.error('[Pump] Firebase read failed:', err.message);
+    res.status(503).json({ error: 'Không thể đọc trạng thái máy bơm từ Firebase.' });
+  }
+});
+
+// POST /api/sensors/pump — Set auto mode or manually switch the pump on/off.
+router.post('/pump', async (req, res) => {
+  const command = String(req.body?.command || '').toLowerCase();
+  if (!['auto', 'on', 'off'].includes(command)) {
+    return res.status(400).json({ error: 'command phải là auto, on hoặc off.' });
+  }
+
+  const isAuto = command === 'auto';
+  const now = Date.now();
+  const update = {
+    command,
+    mode: isAuto ? 'auto' : 'manual',
+    enabled: isAuto || command === 'on',
+    manual_override: !isAuto,
+    updated_at: new Date(now).toISOString(),
+    updated_ts: now / 1000,
+    updated_by: 'web',
+  };
+
+  try {
+    const { database } = getFirebaseServices();
+    const pumpRef = database.ref(`plant/${DEFAULT_PLANT_ID}/control/pump`);
+    await pumpRef.update(update);
+    const snapshot = await pumpRef.get();
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: snapshot.val() });
+  } catch (err) {
+    console.error('[Pump] Firebase write failed:', err.message);
+    res.status(503).json({ error: 'Không thể gửi lệnh máy bơm lên Firebase.' });
+  }
+});
 
 function toTimestamp(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -34,19 +87,29 @@ function normalizeReading(value, metadata = {}) {
   };
 }
 
-// GET /api/sensors/firebase?hours=24 — Read node sensor/current + history from RTDB.
+// GET /api/sensors/firebase — Read node sensor/current + retained history from RTDB.
 router.get('/firebase', async (req, res) => {
   try {
     const { database } = getFirebaseServices();
-    const root = await database.ref('/').get();
-    const values = root.val() || {};
-    const hours = Math.min(168, Math.max(1, Number.parseInt(req.query.hours, 10) || 24));
-    const cutoff = Date.now() - hours * 60 * 60 * 1000;
     const nodes = [];
     const history = [];
     const readingCounts = new Map();
+    const configuredNodes = process.env.FIREBASE_SENSOR_NODES
+      ?.split(',')
+      .map(normalizeFirebaseNodeKey)
+      .filter(Boolean);
+    const sqliteNodes = getDb()
+      .prepare("SELECT name FROM ble_nodes WHERE name IS NOT NULL AND TRIM(name) <> ''")
+      .all()
+      .map(row => normalizeFirebaseNodeKey(row.name))
+      .filter(Boolean);
+    const nodeKeys = [...new Set(configuredNodes?.length ? configuredNodes : sqliteNodes)];
+    if (nodeKeys.length === 0) nodeKeys.push('node1');
+    const snapshots = await Promise.all(nodeKeys.map(nodeKey => database.ref(nodeKey).get()));
 
-    for (const [nodeKey, nodeValue] of Object.entries(values)) {
+    for (const [index, snapshot] of snapshots.entries()) {
+      const nodeKey = nodeKeys[index];
+      const nodeValue = snapshot.val();
       if (!nodeValue || typeof nodeValue !== 'object' || !nodeValue.sensor) continue;
 
       const sensor = nodeValue.sensor;
@@ -81,7 +144,7 @@ router.get('/firebase', async (req, res) => {
           node_name: nodeName,
           zone_name: zoneName,
         });
-        if (reading?.timestamp && reading.timestamp >= cutoff) {
+        if (reading?.timestamp !== null && reading?.timestamp !== undefined) {
           history.push(reading);
           readingCounts.set(nodeKey, (readingCounts.get(nodeKey) || 0) + 1);
         }

@@ -144,6 +144,13 @@ và `/{node}/history` qua API của webserver. `FIREBASE_ENABLED=true` bật gat
 đẩy các số đo mới lên Firebase; service account ở `GOOGLE_APPLICATION_CREDENTIALS`
 cần có quyền đọc/ghi Realtime Database.
 
+Biểu đồ hiển thị toàn bộ lịch sử Firebase đang giữ (mặc định tối đa 100 lần đo mỗi
+node). Điều khiển bơm đọc/ghi tại `plant/{PLANT_ID}/control/pump` (mặc định
+`plant/tomato_001/control/pump`): `POST /api/sensors/pump` nhận
+`{"command":"auto"}`, `{"command":"on"}` hoặc `{"command":"off"}`. Chế độ
+thủ công ghi `mode`, `enabled`, `manual_override`, `updated_at`, `updated_ts` và
+`updated_by=web` để bộ điều khiển thiết bị nhận lệnh.
+
 Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` sẽ nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật kết quả. Ứng dụng theo dõi `GET /api/camera/capture/{request_id}` để hiển thị ảnh. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
 
 Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`. Web server Node.js do `smart-plant-engine` khởi chạy và quản lý; script cập nhật sẽ xóa tiến trình PM2 `smart-plant-server` cũ nếu còn sót rồi restart engine. Không chạy thêm Node server riêng bằng PM2 vì sẽ tranh cổng 3000. Dữ liệu được ghi như sau:
