@@ -139,7 +139,7 @@ FIREBASE_ENABLED=true
 GOOGLE_APPLICATION_CREDENTIALS=../ai_engine/config/pi4-iot.json
 ```
 
-Chatbot web gọi Firebase Callable Function `askChatbot` trực tiếp bằng Firebase Web SDK tại vùng `asia-southeast1`. Web dùng cùng Firebase project và Google Sign-In như app Flutter; Firebase SDK tự đính kèm Auth token. Cấu hình Firebase Web trong `client/src/firebaseClient.js` là thông tin client công khai; không đặt `GEMINI_API_KEY` ở web, Vite hay Pi. Trong Firebase Console, cần bật Google provider và thêm hostname web của Pi vào **Authentication → Settings → Authorized domains**. Function `askChatbot` phải được deploy tại `asia-southeast1` và gắn Secret `GEMINI_API_KEY`.
+Chatbot web gọi Firebase Callable Function `askChatbot` trực tiếp bằng Firebase Web SDK tại vùng `asia-southeast1`. Web tự tạo phiên Firebase Anonymous để chat mà không cần Google Sign-In; bật provider **Anonymous** tại Firebase Console → Authentication → Sign-in method. Người dùng vẫn có thể chọn đăng nhập Google; nếu dùng cách đó, thêm hostname web của Pi vào **Authentication → Settings → Authorized domains** và bật Google provider. Firebase SDK tự đính kèm Auth token cho Function. Cấu hình Firebase Web trong `client/src/firebaseClient.js` là thông tin client công khai; không đặt `GEMINI_API_KEY` ở web, Vite hay Pi. Function `askChatbot` phải được deploy tại `asia-southeast1` và gắn Secret `GEMINI_API_KEY`.
 
 Dashboard đọc số đo cảm biến và lịch sử từ Realtime Database tại `/{node}/sensor`
 và `/{node}/history` qua API của webserver. `FIREBASE_ENABLED=true` bật gateway

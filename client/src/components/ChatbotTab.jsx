@@ -8,6 +8,7 @@ import {
 } from '../api';
 import {
   describeFirebaseChatError,
+  signInToFirebaseAnonymously,
   observeFirebaseUser,
   signInToFirebaseWithGoogle,
   signOutFromFirebase,
@@ -31,16 +32,35 @@ export default function ChatbotTab() {
   const chatContainerRef = useRef(null);
 
   useEffect(() => {
+    let isActive = true;
     let unsubscribe = () => {};
     try {
       unsubscribe = observeFirebaseUser(
-        (user) => setAuthState({ loading: false, user, error: '' }),
-        (error) => setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) }),
+        (user) => {
+          if (!isActive) return;
+          if (user) {
+            setAuthState({ loading: false, user, error: '' });
+            return;
+          }
+
+          setAuthState({ loading: true, user: null, error: '' });
+          signInToFirebaseAnonymously().catch((error) => {
+            if (isActive) {
+              setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) });
+            }
+          });
+        },
+        (error) => {
+          if (isActive) setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) });
+        },
       );
     } catch (error) {
       setAuthState({ loading: false, user: null, error: describeFirebaseChatError(error) });
     }
-    return () => unsubscribe();
+    return () => {
+      isActive = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -113,7 +133,7 @@ export default function ChatbotTab() {
     const text = String(messageText || '').trim();
     if (!text || isLoading) return;
     if (!authState.user) {
-      setAuthState((current) => ({ ...current, error: 'Bạn cần đăng nhập Google để sử dụng trợ lý AI.' }));
+      setAuthState((current) => ({ ...current, error: 'Chưa có phiên Firebase. Hãy thử kết nối lại chatbot.' }));
       return;
     }
 
@@ -162,6 +182,18 @@ export default function ChatbotTab() {
     }
   };
 
+  const handleRetryAnonymousSignIn = async () => {
+    setAuthBusy(true);
+    setAuthState((current) => ({ ...current, error: '' }));
+    try {
+      await signInToFirebaseAnonymously();
+    } catch (error) {
+      setAuthState((current) => ({ ...current, error: describeFirebaseChatError(error) }));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     setAuthBusy(true);
     try {
@@ -202,10 +234,13 @@ export default function ChatbotTab() {
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-900 font-display">Trợ lý AI Thực vật</h2>
-          <p className="text-sm text-slate-500">{authState.user?.email || 'Đăng nhập Firebase để bắt đầu chat'}</p>
+          <p className="text-sm text-slate-500">
+            {authState.user?.email
+              || (authState.user?.isAnonymous ? 'Đang chat với tư cách khách' : 'Đang kết nối chatbot Firebase...')}
+          </p>
         </div>
         <div className="ml-auto">
-          {authState.user ? (
+          {authState.user && !authState.user.isAnonymous ? (
             <button
               type="button"
               onClick={handleSignOut}
@@ -215,17 +250,17 @@ export default function ChatbotTab() {
               {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
               Đăng xuất
             </button>
-          ) : (
+          ) : authState.user?.isAnonymous ? (
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              disabled={authBusy || authState.loading}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              disabled={authBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
             >
-              {authBusy || authState.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
               Đăng nhập Google
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -294,18 +329,28 @@ export default function ChatbotTab() {
       <div ref={chatContainerRef} className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4 custom-scrollbar">
         {!authState.user && !authState.loading && (
           <div className="mx-auto max-w-lg rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
-            <p className="text-sm font-semibold text-slate-800">Đăng nhập để dùng chatbot Firebase</p>
-            <p className="mt-1 text-xs text-slate-600">Web dùng Google Sign-In cùng Firebase project với app Flutter. Function vẫn giữ yêu cầu xác thực.</p>
-            {authState.error && <p className="mt-3 text-sm text-rose-700">{authState.error}</p>}
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={authBusy}
-              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-              Đăng nhập Google
-            </button>
+            <p className="text-sm font-semibold text-slate-800">Chưa kết nối được chatbot</p>
+            <p className="mt-1 text-xs text-slate-600">{authState.error || 'Firebase chưa tạo được phiên chat khách.'}</p>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={handleRetryAnonymousSignIn}
+                disabled={authBusy}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {authBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                Thử kết nối lại
+              </button>
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={authBusy}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                <LogIn className="h-4 w-4" />
+                Đăng nhập Google
+              </button>
+            </div>
           </div>
         )}
         {messages.map((msg) => (
@@ -351,7 +396,9 @@ export default function ChatbotTab() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={authState.user ? 'Nhập câu hỏi về cây trồng...' : 'Đăng nhập Google để chat'}
+          placeholder={authState.user
+            ? 'Nhập câu hỏi về cây trồng...'
+            : authState.loading ? 'Đang kết nối chatbot...' : 'Firebase chưa sẵn sàng'}
           disabled={!authState.user || authState.loading || isLoading}
           className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-4 py-3 pr-12 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all shadow-sm"
         />

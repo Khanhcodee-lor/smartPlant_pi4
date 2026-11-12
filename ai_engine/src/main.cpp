@@ -87,7 +87,11 @@ std::string find_server_dir() {
  * Tìm node binary (hỗ trợ NVM)
  */
 std::string find_node_binary() {
-    // Thử NVM trước
+    // Ưu tiên Node hệ thống để giữ ABI khớp với native addons cài trong server/.
+    if (access("/usr/bin/node", X_OK) == 0) return "/usr/bin/node";
+    if (access("/usr/local/bin/node", X_OK) == 0) return "/usr/local/bin/node";
+
+    // Chỉ dùng NVM khi Pi không có Node hệ thống.
     const char* home = getenv("HOME");
     if (home) {
         std::string nvm_node = std::string(home) + "/.nvm/versions/node";
@@ -110,10 +114,6 @@ std::string find_node_binary() {
             }
         }
     }
-
-    // Thử system node
-    if (access("/usr/bin/node", X_OK) == 0) return "/usr/bin/node";
-    if (access("/usr/local/bin/node", X_OK) == 0) return "/usr/local/bin/node";
 
     return "";
 }

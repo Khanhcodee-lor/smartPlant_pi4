@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2 } from 'lucide-react';
-import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture } from '../api';
-import { Trash2 } from 'lucide-react';
+import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2, ZoomIn, ZoomOut, Sliders, RotateCcw, Trash2 } from 'lucide-react';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture, fetchCameraControls, setCameraControls } from '../api';
 
 export default function CameraPestTab() {
   const [history, setHistory] = useState([]);
@@ -21,6 +20,110 @@ export default function CameraPestTab() {
   const [isLiveStreamMode, setIsLiveStreamMode] = useState(false);
   const fileInputRef = useRef(null);
   const historyRefreshInProgress = useRef(false);
+
+  // Camera Hardware (Sharpness) & Digital Zoom Controls
+  const [sharpness, setSharpness] = useState(128);
+  const [isUpdatingSharpness, setIsUpdatingSharpness] = useState(false);
+  const [zoom, setZoom] = useState(1.0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const sharpnessDebounceRef = useRef(null);
+  const viewerContainerRef = useRef(null);
+
+  // Đọc thông số camera phần cứng ban đầu
+  useEffect(() => {
+    fetchCameraControls().then((res) => {
+      if (res?.success && res?.controls?.sharpness !== undefined) {
+        setSharpness(res.controls.sharpness);
+      }
+    });
+  }, []);
+
+  const handleSharpnessChange = (value) => {
+    const val = Number(value);
+    setSharpness(val);
+    if (sharpnessDebounceRef.current) clearTimeout(sharpnessDebounceRef.current);
+    sharpnessDebounceRef.current = setTimeout(async () => {
+      setIsUpdatingSharpness(true);
+      await setCameraControls({ sharpness: val });
+      setIsUpdatingSharpness(false);
+    }, 200);
+  };
+
+  const handleResetSharpness = async () => {
+    setSharpness(128);
+    setIsUpdatingSharpness(true);
+    await setCameraControls({ sharpness: 128 });
+    setIsUpdatingSharpness(false);
+  };
+
+  const handleZoomChange = (newZoom) => {
+    const clamped = Math.max(0.8, Math.min(3.0, parseFloat(newZoom)));
+    const rounded = parseFloat(clamped.toFixed(1));
+    setZoom(rounded);
+    if (rounded <= 1.0) {
+      setPan({ x: 0, y: 0 });
+    }
+  };
+
+  const handleResetZoom = () => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    const next = Math.max(0.8, Math.min(3.0, zoom + delta));
+    handleZoomChange(next);
+  };
+
+  const handleMouseDown = (e) => {
+    if (zoom <= 1.0) return;
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging || zoom <= 1.0) return;
+    setPan({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y,
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e) => {
+    if (zoom <= 1.0 || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    setIsDragging(true);
+    setDragStart({ x: touch.clientX - pan.x, y: touch.clientY - pan.y });
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isDragging || zoom <= 1.0 || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    setPan({
+      x: touch.clientX - dragStart.x,
+      y: touch.clientY - dragStart.y,
+    });
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
+
+  const getSharpnessStatus = (val) => {
+    if (val < 60) return { label: 'Rất mịn (Soft)', color: 'text-sky-600 bg-sky-50 border-sky-200' };
+    if (val < 110) return { label: 'Mịn vừa', color: 'text-blue-600 bg-blue-50 border-blue-200' };
+    if (val <= 145) return { label: 'Mặc định (128)', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+    if (val <= 200) return { label: 'Tăng nét (Rõ viền)', color: 'text-amber-700 bg-amber-50 border-amber-200' };
+    return { label: 'Cực nét (Soi sâu bệnh)', color: 'text-purple-700 bg-purple-50 border-purple-200' };
+  };
 
   const fetchHistoryWithoutOverlap = useCallback(async () => {
     if (historyRefreshInProgress.current) return null;
@@ -377,29 +480,102 @@ export default function CameraPestTab() {
           </div>
         )}
 
-        <div className="relative w-full h-[45vh] sm:h-[55vh] md:h-[65vh] 2xl:h-[70vh] bg-slate-900 rounded-xl overflow-hidden group shadow-inner">
-          {/* Active Image (Livestream OR Test image OR fallback) */}
-          {isLiveStreamMode ? (
-            <img 
-              src={`/api/camera/stream`} 
-              alt="Camera Live Stream"
-              className="w-full h-full object-contain bg-slate-950"
-              onError={(e) => {
-                e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
-              }}
-            />
-          ) : (
-            <img 
-              src={activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`} 
-              alt="AI Detection Feed"
-              onError={(e) => {
-                if (!activeTestImage) {
+        <div 
+          ref={viewerContainerRef}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onDoubleClick={handleResetZoom}
+          className={`relative w-full h-[45vh] sm:h-[55vh] md:h-[65vh] 2xl:h-[70vh] bg-slate-900 rounded-xl overflow-hidden group shadow-inner select-none ${
+            zoom > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
+          }`}
+        >
+          {/* Zoomed & Panned Content Container */}
+          <div 
+            className="w-full h-full flex items-center justify-center transition-transform duration-75 ease-out"
+            style={{
+              transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+              transformOrigin: 'center center',
+            }}
+          >
+            {/* Active Image (Livestream OR Test image OR fallback) */}
+            {isLiveStreamMode ? (
+              <img 
+                src={`/api/camera/stream`} 
+                alt="Camera Live Stream"
+                draggable={false}
+                className="w-full h-full object-contain bg-slate-950 pointer-events-none"
+                onError={(e) => {
                   e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
-                }
-              }}
-              className="w-full h-full object-contain bg-slate-950"
-            />
-          )}
+                }}
+              />
+            ) : (
+              <img 
+                src={activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`} 
+                alt="AI Detection Feed"
+                draggable={false}
+                onError={(e) => {
+                  if (!activeTestImage) {
+                    e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
+                  }
+                }}
+                className="w-full h-full object-contain bg-slate-950 pointer-events-none"
+              />
+            )}
+          </div>
+
+          {/* Floating Zoom Indicator & Controls (Top Left & Top Right) */}
+          <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
+            {zoom > 1.0 ? (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-xs font-bold rounded-lg border border-white/20 shadow">
+                <ZoomIn className="w-3.5 h-3.5 text-blue-400" />
+                <span>Zoom {zoom.toFixed(1)}x</span>
+                <span className="text-[10px] text-slate-300 font-normal hidden sm:inline">(Kéo chuột để di chuyển)</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 backdrop-blur-md text-slate-300 text-xs rounded-lg border border-white/10 opacity-70 group-hover:opacity-100 transition-opacity">
+                <ZoomIn className="w-3.5 h-3.5 text-slate-400" />
+                <span>1.0x (Chuẩn)</span>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Zoom Presets Overlay on Top Right */}
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-black/50 backdrop-blur-md p-1 rounded-lg border border-white/15 opacity-80 group-hover:opacity-100 transition-opacity">
+            {[0.8, 1.0, 1.5, 2.0, 3.0].map((preset) => (
+              <button
+                key={preset}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleZoomChange(preset);
+                }}
+                className={`px-2 py-0.5 text-xs font-bold rounded transition-colors ${
+                  zoom === preset
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-white/80 hover:bg-white/20'
+                }`}
+              >
+                {preset}x
+              </button>
+            ))}
+            {zoom !== 1.0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleResetZoom();
+                }}
+                title="Reset Zoom về 1.0x"
+                className="p-1 text-white/70 hover:text-white rounded hover:bg-white/20 transition-colors ml-0.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
           {/* Analyzing Spinner Overlay */}
           {analyzing && (
@@ -463,6 +639,106 @@ export default function CameraPestTab() {
               >
                 <Maximize2 className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Camera Hardware (Sharpness) & Software (Digital Zoom) Controls Bar */}
+        <div className="mt-4 p-4 rounded-xl bg-slate-50/90 border border-slate-200/80 backdrop-blur-sm grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 shadow-sm">
+          {/* Sharpness Control */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-800">Độ sắc nét phần cứng (Sharpness)</span>
+                {isUpdatingSharpness && (
+                  <span className="text-[10px] text-emerald-600 animate-pulse font-medium">Đang lưu...</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${getSharpnessStatus(sharpness).color}`}>
+                  {sharpness} — {getSharpnessStatus(sharpness).label}
+                </span>
+                {sharpness !== 128 && (
+                  <button
+                    onClick={handleResetSharpness}
+                    title="Đặt lại mức mặc định 128"
+                    className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 underline underline-offset-2"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Mặc định
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-slate-400 font-mono font-medium">0</span>
+              <input
+                type="range"
+                min="0"
+                max="255"
+                step="1"
+                value={sharpness}
+                onChange={(e) => handleSharpnessChange(e.target.value)}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+              />
+              <span className="text-[11px] text-slate-400 font-mono font-medium">255</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 px-1 font-medium">
+              <span>0 (Mịn mềm)</span>
+              <span>128 (Chuẩn gốc Brio 100)</span>
+              <span>255 (Sắc nét tối đa)</span>
+            </div>
+          </div>
+
+          {/* Digital Zoom Control */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ZoomIn className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-slate-800">Thu phóng kỹ thuật số (Digital Zoom)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[0.8, 1.0, 1.5, 2.0, 3.0].map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => handleZoomChange(preset)}
+                    className={`px-2 py-0.5 text-xs font-bold rounded border transition-all ${
+                      zoom === preset
+                        ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {preset}x
+                  </button>
+                ))}
+                {zoom !== 1.0 && (
+                  <button
+                    onClick={handleResetZoom}
+                    title="Đặt lại 1.0x"
+                    className="p-1 text-slate-500 hover:text-slate-800 rounded hover:bg-slate-200 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-slate-400 font-mono font-medium">0.8x</span>
+              <input
+                type="range"
+                min="0.8"
+                max="3.0"
+                step="0.1"
+                value={zoom}
+                onChange={(e) => handleZoomChange(e.target.value)}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <span className="text-[11px] text-slate-400 font-mono font-medium">3.0x</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 px-1 font-medium">
+              <span>0.8x (Thu nhỏ bao quát)</span>
+              <span>1.0x (Góc chuẩn 16:9 HD)</span>
+              <span>3.0x (Cận cảnh đốm bệnh)</span>
             </div>
           </div>
         </div>

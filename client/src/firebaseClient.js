@@ -3,6 +3,7 @@ import {
   GoogleAuthProvider,
   getAuth,
   onAuthStateChanged,
+  signInAnonymously,
   signInWithPopup,
   signOut,
 } from 'firebase/auth';
@@ -19,6 +20,7 @@ const FIREBASE_CONFIG = {
 
 const FUNCTIONS_REGION = 'asia-southeast1';
 let services;
+let anonymousSignInPromise;
 
 function getFirebaseServices() {
   if (services) return services;
@@ -47,6 +49,29 @@ export async function signInToFirebaseWithGoogle() {
   return signInWithPopup(auth, new GoogleAuthProvider());
 }
 
+export async function signInToFirebaseAnonymously() {
+  const { auth } = getFirebaseServices();
+  if (auth.currentUser) return auth.currentUser;
+
+  if (!anonymousSignInPromise) {
+    anonymousSignInPromise = signInAnonymously(auth)
+      .then((result) => result.user)
+      .catch((error) => {
+        if (error?.code === 'auth/operation-not-allowed') {
+          const setupError = new Error('Đăng nhập ẩn danh chưa được bật trong Firebase Authentication.');
+          setupError.code = 'auth/anonymous-disabled';
+          throw setupError;
+        }
+        throw error;
+      })
+      .finally(() => {
+        anonymousSignInPromise = null;
+      });
+  }
+
+  return anonymousSignInPromise;
+}
+
 export async function signOutFromFirebase() {
   const { auth } = getFirebaseServices();
   return signOut(auth);
@@ -55,7 +80,7 @@ export async function signOutFromFirebase() {
 export async function callAskChatbot(data) {
   const { auth, functions } = getFirebaseServices();
   if (!auth.currentUser) {
-    const error = new Error('Bạn cần đăng nhập để sử dụng trợ lý AI.');
+    const error = new Error('Cần có phiên Firebase để sử dụng trợ lý AI.');
     error.code = 'functions/unauthenticated';
     throw error;
   }
@@ -75,7 +100,10 @@ export function describeFirebaseChatError(error) {
     return 'Tên miền hoặc địa chỉ Raspberry Pi chưa được thêm vào Firebase Authentication → Authorized domains.';
   }
   if (code === 'operation-not-allowed' || code === 'provider-already-linked') {
-    return 'Google Sign-In chưa được bật trong Firebase Authentication.';
+    return 'Phương thức đăng nhập này chưa được bật trong Firebase Authentication.';
+  }
+  if (code === 'anonymous-disabled') {
+    return 'Hãy bật Anonymous trong Firebase Console → Authentication → Sign-in method để chat không cần Google Sign-In.';
   }
   if (code === 'popup-closed-by-user') {
     return 'Cửa sổ đăng nhập Google đã bị đóng trước khi hoàn tất.';
@@ -87,7 +115,7 @@ export function describeFirebaseChatError(error) {
     return 'Mất kết nối tới Firebase. Kiểm tra mạng của trình duyệt/Raspberry Pi rồi thử lại.';
   }
   if (code === 'unauthenticated') {
-    return 'Bạn cần đăng nhập Google để sử dụng trợ lý AI.';
+    return 'Cần có phiên Firebase để sử dụng trợ lý AI.';
   }
   if (code === 'not-found') {
     return `Firebase Function askChatbot chưa được deploy ở vùng ${FUNCTIONS_REGION}.`;

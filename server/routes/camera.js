@@ -1,8 +1,18 @@
 const express = require('express');
 const axios = require('axios');
+const { execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const { getFirebaseServices } = require('../firebase');
 const router = express.Router();
+
+function execV4l2(args) {
+  return new Promise((resolve, reject) => {
+    execFile('v4l2-ctl', args, { timeout: 3000 }, (error, stdout) => {
+      if (error) return reject(error);
+      resolve(stdout);
+    });
+  });
+}
 
 // Lấy IP từ biến môi trường hoặc mặc định là localhost
 const USTREAMER_URL = process.env.USTREAMER_URL || 'http://127.0.0.1:8080';
@@ -57,6 +67,68 @@ router.get('/snapshot', async (req, res) => {
   } catch (err) {
     console.error('[Camera] Lỗi lấy snapshot:', err.message);
     res.status(502).json({ error: 'Không thể lấy ảnh từ camera' });
+  }
+});
+
+/**
+ * GET /api/camera/controls — Lấy thông số phần cứng của camera (sharpness, brightness, contrast...)
+ */
+router.get('/controls', async (req, res) => {
+  const device = process.env.CAMERA_DEVICE || '/dev/video0';
+  try {
+    const stdout = await execV4l2(['-d', device, '--get-ctrl=sharpness,brightness,contrast,saturation']);
+    const controls = {};
+    for (const line of stdout.split('\n')) {
+      const parts = line.split(':');
+      if (parts.length === 2) {
+        const key = parts[0].trim();
+        const val = parseInt(parts[1].trim(), 10);
+        if (!isNaN(val)) controls[key] = val;
+      }
+    }
+    res.json({ success: true, controls });
+  } catch (err) {
+    console.error('[Camera] Lỗi đọc controls:', err.message);
+    res.status(500).json({ success: false, error: 'Không đọc được thông số camera.' });
+  }
+});
+
+/**
+ * POST /api/camera/controls — Cập nhật thông số phần cứng camera (sharpness, v.v.)
+ */
+router.post('/controls', async (req, res) => {
+  const device = process.env.CAMERA_DEVICE || '/dev/video0';
+  const { sharpness, brightness, contrast, saturation } = req.body || {};
+  const updates = [];
+
+  if (sharpness !== undefined && !isNaN(Number(sharpness))) {
+    const val = Math.max(0, Math.min(255, Math.round(Number(sharpness))));
+    updates.push(`sharpness=${val}`);
+  }
+  if (brightness !== undefined && !isNaN(Number(brightness))) {
+    const val = Math.max(0, Math.min(255, Math.round(Number(brightness))));
+    updates.push(`brightness=${val}`);
+  }
+  if (contrast !== undefined && !isNaN(Number(contrast))) {
+    const val = Math.max(0, Math.min(255, Math.round(Number(contrast))));
+    updates.push(`contrast=${val}`);
+  }
+  if (saturation !== undefined && !isNaN(Number(saturation))) {
+    const val = Math.max(0, Math.min(255, Math.round(Number(saturation))));
+    updates.push(`saturation=${val}`);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ success: false, error: 'Không có thông số hợp lệ để cập nhật.' });
+  }
+
+  try {
+    const args = ['-d', device, '-c', updates.join(',')];
+    await execV4l2(args);
+    res.json({ success: true, updated: updates });
+  } catch (err) {
+    console.error('[Camera] Lỗi cài đặt controls:', err.message);
+    res.status(500).json({ success: false, error: 'Không cài đặt được thông số camera.' });
   }
 });
 

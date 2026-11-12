@@ -9,6 +9,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Frontend builds use Firebase Web SDK 13 and Vite 8, which require Node 24.12+.
+# Load NVM explicitly because webhook/cron shells do not source interactive bash files.
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$NVM_DIR/nvm.sh"
+    nvm use 24 --silent > /dev/null
+fi
+
+if ! command -v node > /dev/null 2>&1; then
+    echo "Lỗi: Không tìm thấy Node.js. Cài Node.js 24 LTS rồi chạy lại auto_update.sh."
+    exit 1
+fi
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+NODE_MINOR="$(node -p 'process.versions.node.split(".")[1]')"
+if [ "$NODE_MAJOR" -lt 24 ] || { [ "$NODE_MAJOR" -eq 24 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
+    echo "Lỗi: Build frontend cần Node.js >= 24.12; hiện tại là $(node --version)."
+    exit 1
+fi
+
 LOCK_FILE="/tmp/smartplant-update.lock"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then

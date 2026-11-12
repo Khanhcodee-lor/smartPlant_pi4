@@ -255,6 +255,28 @@ export async function fetchPiCameraCapture(requestId) {
   }
 }
 
+/** Fetch hardware camera controls (sharpness, etc.) — GET /api/camera/controls */
+export async function fetchCameraControls() {
+  return apiFetch('/camera/controls');
+}
+
+/** Set hardware camera controls (sharpness, etc.) — POST /api/camera/controls */
+export async function setCameraControls(controls) {
+  try {
+    const res = await fetch(`${API_BASE}/camera/controls`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(controls),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) return { ...result, success: false };
+    return result;
+  } catch (err) {
+    console.error('[API] setCameraControls:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 /** Get current WiFi status — GET /api/wifi/status */
 export async function getWifiStatus() {
   const result = await apiFetch('/wifi/status');
