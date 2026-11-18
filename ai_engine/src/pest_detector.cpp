@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -123,6 +124,21 @@ PestDetector::PestDetector(const std::string& model_path)
             confidence_threshold_ = value;
         } else {
             std::cerr << "[AI] YOLO_CONFIDENCE_THRESHOLD không hợp lệ; dùng 0.35\n";
+        }
+    }
+
+    if (const char* configured = std::getenv("YOLO_ENHANCE")) {
+        const std::string value(configured);
+        if (value == "0") enhance_enabled_ = false;
+        else if (value != "1") std::cerr << "[AI] YOLO_ENHANCE không hợp lệ; dùng 1\n";
+    }
+    if (const char* configured = std::getenv("YOLO_SHARPEN_STRENGTH")) {
+        char* end = nullptr;
+        const float value = std::strtof(configured, &end);
+        if (end != configured && *end == '\0' && std::isfinite(value) && value >= 0.0f && value <= 1.0f) {
+            sharpen_strength_ = value;
+        } else {
+            std::cerr << "[AI] YOLO_SHARPEN_STRENGTH không hợp lệ; dùng 0.3\n";
         }
     }
 
@@ -258,32 +274,33 @@ nlohmann::json PestDetector::detect(int zone_id) {
     return detect_mat(frame, zone_id, false); // NO base64 for periodic POST (avoid PayloadTooLarge)
 }
 
-nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool include_b64) {
-    if (!model_loaded_ || frame.empty()) {
-        return nullptr;
-    }
-
-    // A disconnected or severely overexposed camera can produce an almost
-    // uniform frame. The model may still assign it a confident "healthy"
-    // label, even though there is no visible leaf to evaluate.
-    cv::Scalar mean, deviation;
-    cv::meanStdDev(frame, mean, deviation);
-    if (std::max({deviation[0], deviation[1], deviation[2]}) < 2.0) {
-        std::cout << "[AI] Ảnh gần như không có chi tiết; không thể đánh giá.\n";
-        return nullptr;
-    }
-
-    // Match the model's fixed 640x640 letterbox preprocessing without stretching
-    // webcam frames. Retain the padding and scale to map boxes back to the photo.
+std::vector<PestDetector::Detection> PestDetector::detect_region(
+    const cv::Mat& frame, const cv::Rect& region, bool sharpen
+) {
+    // Letterbox without stretching, then map results back to the original image.
+    const cv::Mat view = frame(region);
     constexpr int input_size = 640;
-    const float scale = std::min(input_size / static_cast<float>(frame.cols),
-                                 input_size / static_cast<float>(frame.rows));
-    const int resized_width = std::max(1, static_cast<int>(std::round(frame.cols * scale)));
-    const int resized_height = std::max(1, static_cast<int>(std::round(frame.rows * scale)));
+    const float scale = std::min(input_size / static_cast<float>(view.cols),
+                                 input_size / static_cast<float>(view.rows));
+    const int resized_width = std::max(1, static_cast<int>(std::round(view.cols * scale)));
+    const int resized_height = std::max(1, static_cast<int>(std::round(view.rows * scale)));
     const int pad_left = (input_size - resized_width) / 2;
     const int pad_top = (input_size - resized_height) / 2;
     cv::Mat resized, letterboxed;
-    cv::resize(frame, resized, cv::Size(resized_width, resized_height));
+    cv::resize(view, resized, cv::Size(resized_width, resized_height));
+    if (sharpen && sharpen_strength_ > 0.0f) {
+        // Apply a small unsharp mask to luminance only, preserving the original
+        // capture and avoiding artificial colour changes from channel sharpening.
+        cv::Mat ycrcb, blurred;
+        std::vector<cv::Mat> channels;
+        cv::cvtColor(resized, ycrcb, cv::COLOR_BGR2YCrCb);
+        cv::split(ycrcb, channels);
+        cv::GaussianBlur(channels[0], blurred, cv::Size(), 1.0);
+        cv::addWeighted(channels[0], 1.0 + sharpen_strength_, blurred,
+                        -sharpen_strength_, 0.0, channels[0]);
+        cv::merge(channels, ycrcb);
+        cv::cvtColor(ycrcb, resized, cv::COLOR_YCrCb2BGR);
+    }
     cv::copyMakeBorder(resized, letterboxed, pad_top, input_size - resized_height - pad_top,
                        pad_left, input_size - resized_width - pad_left,
                        cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
@@ -293,12 +310,17 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
 
     // 4. Chạy dự đoán (Forward)
     std::vector<cv::Mat> outputs;
-    try {
-        net_.forward(outputs, net_.getUnconnectedOutLayersNames());
-    } catch (const cv::Exception& error) {
-        std::cerr << "[AI] OpenCV không chạy được đầu ra model; thử chế độ tương thích: "
-                  << error.what() << "\n";
+    if (use_compat_) {
         outputs = {forward_yolo_compat(net_, blob, confidence_threshold_)};
+    } else {
+        try {
+            net_.forward(outputs, net_.getUnconnectedOutLayersNames());
+        } catch (const cv::Exception& error) {
+            std::cerr << "[AI] OpenCV không chạy được đầu ra model; thử chế độ tương thích: "
+                      << error.what() << "\n";
+            outputs = {forward_yolo_compat(net_, blob, confidence_threshold_)};
+            use_compat_ = true;
+        }
     }
 
     // 5. Parse output YOLOv8 (Output shape: [1, classes + 4, 8400])
@@ -335,14 +357,14 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
             int top = static_cast<int>((y - 0.5f * h - pad_top) / scale);
             int right = static_cast<int>((x + 0.5f * w - pad_left) / scale);
             int bottom = static_cast<int>((y + 0.5f * h - pad_top) / scale);
-            left = std::clamp(left, 0, frame.cols);
-            right = std::clamp(right, 0, frame.cols);
-            top = std::clamp(top, 0, frame.rows);
-            bottom = std::clamp(bottom, 0, frame.rows);
+            left = std::clamp(left, 0, view.cols);
+            right = std::clamp(right, 0, view.cols);
+            top = std::clamp(top, 0, view.rows);
+            bottom = std::clamp(bottom, 0, view.rows);
             if (right > left && bottom > top) {
                 confidences.push_back(static_cast<float>(max_class_score));
                 class_ids.push_back(class_id.x);
-                boxes.emplace_back(left, top, right - left, bottom - top);
+                boxes.emplace_back(region.x + left, region.y + top, right - left, bottom - top);
             }
         }
         data += dimensions;
@@ -352,28 +374,131 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
     std::vector<int> indices;
     cv::dnn::NMSBoxes(boxes, confidences, confidence_threshold_, 0.4f, indices);
 
-    if (indices.empty()) {
+    std::vector<Detection> detections;
+    for (int index : indices) {
+        detections.push_back({class_ids[index], confidences[index], boxes[index]});
+    }
+    return detections;
+}
+
+nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool include_b64) {
+    if (!model_loaded_ || frame.empty()) {
+        return nullptr;
+    }
+
+    // Reject nearly uniform or almost completely clipped frames. This is only
+    // a basic quality check, not proof that a usable leaf is present.
+    cv::Scalar mean, deviation;
+    cv::meanStdDev(frame, mean, deviation);
+    const double variation = std::max({deviation[0], deviation[1], deviation[2]});
+    const bool bright_blank = std::min({mean[0], mean[1], mean[2]}) > 242.0 && variation < 12.0;
+    const bool dark_blank = std::max({mean[0], mean[1], mean[2]}) < 12.0 && variation < 12.0;
+    if (variation < 2.0 || bright_blank || dark_blank) {
+        std::cout << "[AI] Ảnh thiếu chi tiết hoặc thiếu sáng; không thể đánh giá.\n";
+        return nullptr;
+    }
+
+    const cv::Rect whole_frame(0, 0, frame.cols, frame.rows);
+    std::vector<Detection> detections = detect_region(frame, whole_frame, false);
+
+    // For on-demand photos, examine up to two detected leaves at a larger scale.
+    // Compare with the unmodified full-frame result and disclose disagreements.
+    if (enhance_enabled_ && include_b64) {
+        if (detections.empty()) {
+            const int side = static_cast<int>(std::round(std::min(frame.cols, frame.rows) * 0.7));
+            if (side >= 64) {
+                const cv::Rect center((frame.cols - side) / 2, (frame.rows - side) / 2, side, side);
+                try {
+                    for (auto detection : detect_region(frame, center, true)) {
+                        if (detection.confidence < std::max(0.60f, confidence_threshold_)) continue;
+                        detection.enhanced = true;
+                        detection.needs_review = true;
+                        detection.center_only = true;
+                        detections.push_back(detection);
+                    }
+                } catch (const std::exception& error) {
+                    std::cerr << "[AI] Không phân tích thêm được vùng giữa ảnh: " << error.what() << "\n";
+                }
+            }
+        } else {
+            int attempts = 0;
+            bool has_enhanced_full_frame = false;
+            std::vector<Detection> enhanced_full_frame;
+            for (auto& original : detections) {
+                const int pad_x = std::max(1, static_cast<int>(std::round(original.box.width * 0.3)));
+                const int pad_y = std::max(1, static_cast<int>(std::round(original.box.height * 0.3)));
+                const cv::Rect expanded(original.box.x - pad_x, original.box.y - pad_y,
+                                        original.box.width + 2 * pad_x, original.box.height + 2 * pad_y);
+                cv::Rect crop = expanded & whole_frame;
+                if (crop.width < 64 || crop.height < 64) continue;
+                const bool enhance_full_frame = static_cast<double>(crop.area()) >= 0.9 * whole_frame.area();
+                if (enhance_full_frame) {
+                    if (sharpen_strength_ <= 0.0f) continue;
+                    crop = whole_frame;
+                }
+                if (attempts++ >= 2) break;
+                try {
+                    std::vector<Detection> candidates;
+                    if (enhance_full_frame && has_enhanced_full_frame) {
+                        candidates = enhanced_full_frame;
+                    } else {
+                        candidates = detect_region(frame, crop, true);
+                        if (enhance_full_frame) {
+                            enhanced_full_frame = candidates;
+                            has_enhanced_full_frame = true;
+                        }
+                    }
+                    const Detection* best = nullptr;
+                    for (const auto& candidate : candidates) {
+                        const double intersection = (candidate.box & original.box).area();
+                        const double union_area = candidate.box.area() + original.box.area() - intersection;
+                        if (union_area <= 0.0 || intersection / union_area < 0.4) continue;
+                        if (!best || candidate.confidence > best->confidence) best = &candidate;
+                    }
+                    if (!best) continue;
+                    const Detection full_result = original;
+                    const bool disagree = best->class_id != full_result.class_id;
+                    if (best->confidence > full_result.confidence + (disagree ? 0.05f : 0.0f)) {
+                        original = *best;
+                    }
+                    original.enhanced = true;
+                    original.full_frame_enhanced = enhance_full_frame;
+                    original.full_frame_confidence = full_result.confidence;
+                    if (disagree) {
+                        original.needs_review = true;
+                        const Detection& alternate = original.class_id == best->class_id ? full_result : *best;
+                        original.alternate_class_id = alternate.class_id;
+                        original.alternate_confidence = alternate.confidence;
+                    }
+                } catch (const std::exception& error) {
+                    std::cerr << "[AI] Không phân tích thêm được vùng lá: " << error.what() << "\n";
+                }
+            }
+        }
+    }
+
+    if (detections.empty()) {
         std::cout << "[AI] Không có nhận diện vượt ngưỡng tin cậy.\n";
         return nullptr;
     }
 
-    // 6. Vẽ Bounding Box cho tất cả các đối tượng phát hiện được
+    // 6. Vẽ khung trên ảnh gốc, không làm thay đổi ảnh đầu vào đã lưu.
     constexpr int healthy_class_id = 3;
-    int best_class_id = healthy_class_id;
-    float best_conf = 0.0f;
+    size_t best_index = 0;
     bool found_disease = false;
 
-    for (int idx : indices) {
-        cv::Rect box = boxes[idx];
-        int class_id = class_ids[idx];
-        float conf = confidences[idx];
+    for (size_t index = 0; index < detections.size(); ++index) {
+        auto& detection = detections[index];
+        cv::Rect box = detection.box;
+        int class_id = detection.class_id;
+        float conf = detection.confidence;
         
         if (class_id >= (int)pest_database_.size()) class_id = 0;
         
         const bool is_disease = class_id != healthy_class_id;
-        if ((is_disease && !found_disease) || (is_disease == found_disease && conf > best_conf)) {
-            best_conf = conf;
-            best_class_id = class_id;
+        if ((is_disease && !found_disease) ||
+            (is_disease == found_disease && conf > detections[best_index].confidence)) {
+            best_index = index;
             found_disease = is_disease;
         }
 
@@ -390,8 +515,29 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         draw_label(frame, label, box.x, box.y);
     }
 
-    auto main_pest = pest_database_[best_class_id];
+    const Detection& best_detection = detections[best_index];
+    const float best_conf = best_detection.confidence;
+    auto main_pest = pest_database_[best_detection.class_id];
     std::string notes = main_pest.notes;
+    if (best_detection.enhanced) {
+        notes += sharpen_strength_ > 0.0f
+            ? ". Đã phân tích thêm vùng lá với độ nét tăng nhẹ"
+            : ". Đã phân tích thêm vùng lá ở kích thước lớn hơn";
+    }
+    if (best_detection.center_only) {
+        notes += ". Kết quả chỉ xuất hiện khi xem vùng giữa ảnh; hãy chụp gần hơn và kiểm tra lại";
+    } else if (best_detection.alternate_class_id >= 0) {
+        const auto& alternate = pest_database_[best_detection.alternate_class_id];
+        notes += ". Lần phân tích còn lại gợi ý " + alternate.name + " (" +
+                 std::to_string(static_cast<int>(std::round(best_detection.alternate_confidence * 100))) +
+                 "%); hai kết quả khác nhau, hãy kiểm tra lại";
+    }
+    if (best_detection.full_frame_confidence >= 0.0f && best_detection.full_frame_confidence < 0.60f &&
+        best_conf >= 0.60f && best_detection.alternate_class_id < 0) {
+        notes += ". Ảnh toàn cảnh có điểm thấp (" +
+                 std::to_string(static_cast<int>(std::round(best_detection.full_frame_confidence * 100))) +
+                 "%); hãy kiểm tra lại";
+    }
     if (best_conf < 0.60f) {
         notes += ". Độ tin cậy còn thấp; hãy chụp rõ hơn và kiểm tra lại";
     }
@@ -402,7 +548,10 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
     auto tm_now = std::localtime(&time_t_now);
     char ts_buf[64];
     std::strftime(ts_buf, sizeof(ts_buf), "%Y%m%d_%H%M%S", tm_now);
-    std::string unique_filename = std::string("detection_") + ts_buf + ".jpg";
+    const auto timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        now.time_since_epoch()).count();
+    std::string unique_filename = std::string("detection_") + ts_buf + "_" +
+                                  std::to_string(getpid()) + "_" + std::to_string(timestamp_ns) + ".jpg";
 
     // Tìm thư mục public/ của Web Server để lưu ảnh
     std::vector<std::string> public_dirs = {
@@ -411,15 +560,27 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         "public",
         "/home/toan/Smart_Plant/server/public"
     };
-    std::string image_url = "/latest_detection.jpg"; // fallback
+    std::string image_url;
     for (const auto& dir : public_dirs) {
         if (fs::exists(dir)) {
-            // Lưu ảnh với tên duy nhất (cho lịch sử)
-            cv::imwrite(dir + "/" + unique_filename, frame);
-            // Cũng ghi đè latest_detection.jpg (cho live view)
-            cv::imwrite(dir + "/latest_detection.jpg", frame);
-            image_url = "/" + unique_filename;
-            break;
+            try {
+                // Lưu ảnh với tên duy nhất (cho lịch sử).
+                if (!cv::imwrite(dir + "/" + unique_filename, frame)) {
+                    std::cerr << "[AI] Không lưu được ảnh nhận diện tại " << dir << "\n";
+                    continue;
+                }
+                image_url = "/" + unique_filename;
+                try {
+                    if (!cv::imwrite(dir + "/latest_detection.jpg", frame)) {
+                        std::cerr << "[AI] Không cập nhật được ảnh xem gần nhất.\n";
+                    }
+                } catch (const cv::Exception& error) {
+                    std::cerr << "[AI] Không cập nhật được ảnh xem gần nhất: " << error.what() << "\n";
+                }
+                break;
+            } catch (const cv::Exception& error) {
+                std::cerr << "[AI] Không lưu được ảnh nhận diện tại " << dir << ": " << error.what() << "\n";
+            }
         }
     }
 
@@ -429,7 +590,12 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         {"zone_id",    zone_id},
         {"severity",   main_pest.severity},
         {"notes",      notes},
-        {"image_path", image_url}
+        {"needs_review", best_detection.needs_review || best_conf < 0.60f ||
+                         (best_detection.full_frame_confidence >= 0.0f && best_detection.full_frame_confidence < 0.60f)},
+        {"analysis_method", best_detection.center_only ? "center_crop" :
+                            best_detection.full_frame_enhanced ? "sharpened_frame" :
+                            best_detection.enhanced ? "leaf_crop" : "full_frame"},
+        {"image_path", image_url.empty() ? nlohmann::json(nullptr) : nlohmann::json(image_url)}
     };
 
     // Chỉ đính kèm base64 khi được yêu cầu (on-demand mode từ UI)

@@ -145,6 +145,7 @@ export default function CameraPestTab() {
       pest_type: disease,
       confidence: Number(confidence) || 0,
       notes: detection.notes || capture.notes || 'Nhận diện mới nhất đã được lưu từ camera Pi.',
+      needs_review: detection.needs_review === true || capture.needs_review === true,
       firebase_capture_id: capture.request_id || capture.capture_id || null,
       capture_source: 'pi_camera'
     });
@@ -346,11 +347,12 @@ export default function CameraPestTab() {
       const confidence = detection.confidence ?? capture.confidence ?? 0;
       const imageUrl = capture.preview_url || capture.snapshot_url || capture.snapshotUrl;
 
-      if (imageUrl) setActiveTestImage(imageUrl);
+      setActiveTestImage(imageUrl || null);
       setAnalysisResult({
         pest_type: disease,
         confidence: Number(confidence) || 0,
         notes: detection.notes || capture.notes || 'Ảnh được chụp trực tiếp bằng camera trên Raspberry Pi.',
+        needs_review: detection.needs_review === true || capture.needs_review === true,
         firebase_capture_id: request.request_id,
         capture_source: 'pi_camera'
       });
@@ -401,7 +403,7 @@ export default function CameraPestTab() {
                     ? 'Đang xem ảnh mẫu từ thẻ nhớ'
                     : 'Chưa có ảnh nhận diện đã lưu'}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Đưa lá cà chua lại gần, đủ sáng và giữ yên để ảnh rõ nét trước khi chụp. Nút zoom chỉ phóng to khung xem, không làm ảnh AI rõ hơn.</p>
+            <p className="mt-1 text-xs text-slate-500">Đặt lá cà chua ở giữa, đưa camera lại gần, đủ sáng và giữ yên khi chụp. Zoom chỉ phóng to khung xem.</p>
           </div>
           
           <div className="flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
@@ -486,7 +488,7 @@ export default function CameraPestTab() {
 
         {/* Analysis Result Toast / Banner */}
         {analysisResult && (
-          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between animate-fade-in-up">
+          <div className={`mb-4 p-3 border rounded-xl flex items-center justify-between animate-fade-in-up ${analysisResult.needs_review ? 'bg-amber-50 border-amber-300' : 'bg-emerald-50 border-emerald-200'}`}>
             <div className="flex items-center gap-2.5">
               <Sparkles className="w-5 h-5 text-emerald-600 shrink-0" />
               <div>
@@ -494,6 +496,7 @@ export default function CameraPestTab() {
                   {analysisResult.capture_source === 'pi_camera' ? 'Ảnh từ camera Pi:' : 'Kết quả phân tích:'} <span className="text-emerald-700">{analysisResult.pest_type}</span>
                   {!/không phát hiện|no detection/i.test(analysisResult.pest_type || '') && Number.isFinite(Number(analysisResult.confidence)) && ` (${Math.round(Number(analysisResult.confidence) * 100)}%)`}
                 </p>
+                {analysisResult.needs_review && <p className="text-[11px] font-bold text-amber-800 mt-1">Cần kiểm tra lại kết quả</p>}
                 <p className="text-[11px] text-slate-600 mt-0.5">{analysisResult.notes}</p>
                 {analysisResult.firebase_capture_id && (
                   <p className="text-[10px] text-emerald-700 mt-0.5">
@@ -868,12 +871,15 @@ export default function CameraPestTab() {
               const isHealthy = /healthy|cây khỏe mạnh/i.test(String(item.pest_type || ''));
               const isDetected = !isHealthy && (item.status === 'detected' || (!item.status && !!item.pest_type));
               const isAnalysisFailed = item.status === 'analysis_failed';
+              const needsReview = item.needs_review === true;
               const sev = severityConfig[item.severity] || severityConfig.low;
-              const badge = isDetected
-                ? sev
-                : isAnalysisFailed
-                  ? { label: 'Lỗi phân tích', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' }
-                  : { label: 'Không phát hiện', bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' };
+              const badge = isAnalysisFailed
+                ? { label: 'Lỗi phân tích', bg: 'bg-rose-100', text: 'text-rose-600', dot: 'bg-rose-500' }
+                : needsReview
+                  ? { label: 'Cần kiểm tra', bg: 'bg-amber-100', text: 'text-amber-700', dot: 'bg-amber-500' }
+                  : isDetected
+                    ? sev
+                    : { label: 'Không phát hiện', bg: 'bg-emerald-100', text: 'text-emerald-700', dot: 'bg-emerald-500' };
               const confidence = item.confidence !== null && item.confidence !== undefined &&
                 Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null;
               const resultTitle = item.pest_type ||

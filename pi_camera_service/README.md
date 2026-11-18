@@ -147,6 +147,27 @@ nhỏ trong ảnh thì đưa camera gần hơn. Ảnh gốc và ảnh có khung 
 được lưu lên Storage. Zoom trong giao diện chỉ phóng to hình xem, không tăng chi
 tiết ảnh đưa vào model. Ảnh gần như một màu sẽ không được kết luận là lá khỏe.
 
+Mỗi lần chụp, service mặc định lấy 3 khung hình cách nhau 0,2 giây, chọn khung
+có nhiều chi tiết cạnh hơn và lưu nguyên JPEG đó. Điểm cạnh chỉ là ước lượng:
+ảnh nhiễu cũng có thể có nhiều cạnh. Model xem toàn ảnh gốc trước, sau đó phân
+tích thêm tối đa hai vùng lá được phóng lên và tăng nét nhẹ (hoặc tăng nét toàn
+ảnh nếu lá đã chiếm gần hết khung). Nếu lần đầu không
+thấy lá, model thử thêm vùng giữa ảnh. Khi hai kết quả khác nhau, ảnh toàn cảnh
+có điểm thấp hoặc chỉ thấy lá ở vùng giữa, giao diện báo **Cần kiểm tra lại**.
+Ảnh gốc vẫn được giữ; tăng nét
+không khôi phục được chi tiết đã mất do sai tiêu cự hay rung camera.
+
+Trong `pi_camera_service/.env`, có thể đặt `CAPTURE_BURST_FRAMES` từ 1 đến 5
+(mặc định 3) và `CAPTURE_BURST_INTERVAL_SECONDS` từ 0 đến 1 (mặc định 0.2).
+`YOLO_ENHANCE=0` tắt lần phân tích bổ sung để so sánh; `YOLO_SHARPEN_STRENGTH`
+từ 0 đến 1 điều chỉnh tăng nét, mặc định 0.3. Đặt về 0 để bỏ tăng nét nhưng vẫn
+phân tích vùng lá. Các lượt bổ sung tốn thêm thời gian CPU trên Pi. Khởi động
+lại camera service và AI listener sau khi đổi các thiết lập này.
+
+Đây là xử lý ảnh trước khi **suy luận** bằng model hiện có, không huấn luyện lại
+model. Kiểm thử bằng nhiều ảnh webcam thật, cả lá khỏe và lá bệnh, trước khi kết
+luận thay đổi làm tăng độ chính xác; điểm model cao cũng có thể là dự đoán sai.
+
 Ngưỡng mặc định là `0.35`. Nếu cần điều chỉnh, đặt `YOLO_CONFIDENCE_THRESHOLD`
 (từ `0` đến `1`) trong `pi_camera_service/.env`, rồi khởi động lại hai dịch vụ
 camera và AI listener. Giảm ngưỡng có thể bắt được thêm bệnh nhưng cũng tăng

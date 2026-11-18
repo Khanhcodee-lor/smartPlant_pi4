@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ class Config:
     max_image_bytes: int
     dry_run: bool = False
     ustreamer_url: str = "http://127.0.0.1:8080"
+    capture_burst_frames: int = 3
+    capture_burst_interval_seconds: float = 0.2
 
     @classmethod
     def from_env(cls, *, dry_run: bool | None = None) -> "Config":
@@ -78,6 +81,10 @@ class Config:
             max_retries=_env_int("MAX_RETRIES", 3, minimum=0),
             retry_base_seconds=_env_float("RETRY_BASE_SECONDS", 1.0, minimum=0.1),
             max_image_bytes=_env_int("MAX_IMAGE_BYTES", 10 * 1024 * 1024, minimum=1024),
+            capture_burst_frames=_env_int("CAPTURE_BURST_FRAMES", 3, minimum=1, maximum=5),
+            capture_burst_interval_seconds=_env_float(
+                "CAPTURE_BURST_INTERVAL_SECONDS", 0.2, minimum=0.0, maximum=1.0
+            ),
             dry_run=is_dry_run,
         )
 
@@ -87,21 +94,27 @@ def _env_bool(name: str, default: bool) -> bool:
     return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_int(name: str, default: int, *, minimum: int) -> int:
+def _env_int(name: str, default: int, *, minimum: int, maximum: int | None = None) -> int:
     try:
         value = int(os.getenv(name, str(default)))
     except ValueError as exc:
         raise ConfigurationError(f"{name} must be an integer") from exc
     if value < minimum:
         raise ConfigurationError(f"{name} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ConfigurationError(f"{name} must be at most {maximum}")
     return value
 
 
-def _env_float(name: str, default: float, *, minimum: float) -> float:
+def _env_float(name: str, default: float, *, minimum: float, maximum: float | None = None) -> float:
     try:
         value = float(os.getenv(name, str(default)))
     except ValueError as exc:
         raise ConfigurationError(f"{name} must be a number") from exc
+    if not math.isfinite(value):
+        raise ConfigurationError(f"{name} must be finite")
     if value < minimum:
         raise ConfigurationError(f"{name} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ConfigurationError(f"{name} must be at most {maximum}")
     return value

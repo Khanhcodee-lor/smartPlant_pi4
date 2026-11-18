@@ -71,6 +71,8 @@ def test_camera_sends_snapshot_to_engine_and_saves_annotated_result(tmp_path):
         "confidence": 0.81,
         "severity": "high",
         "notes": "Kiểm tra vết đốm trên lá",
+        "needs_review": True,
+        "analysis_method": "leaf_crop",
         "image_b64": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode(),
     }
     engine = tmp_path / "fake-engine"
@@ -95,6 +97,8 @@ def test_camera_sends_snapshot_to_engine_and_saves_annotated_result(tmp_path):
     assert capture["diseaseClass"] == result["pest_type"]
     assert capture["confidence"] == 0.81
     assert capture["notes"] == result["notes"]
+    assert capture["needs_review"] is True
+    assert capture["detections"][0]["analysis_method"] == "leaf_crop"
     assert capture["annotated_image_url"].endswith("_annotated.jpg")
     assert "image_b64" not in capture["detections"][0]
     assert firebase.upload_image.call_count == 2

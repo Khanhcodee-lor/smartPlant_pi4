@@ -386,6 +386,7 @@ async function mapFirebaseCapture(doc, zoneNames) {
     zone_name: record.zone_name || zoneNames.get(String(record.zone_id ?? '')) || null,
     severity: record.severity || null,
     notes: record.notes || null,
+    needs_review: record.needs_review === true || record.detections?.[0]?.needs_review === true,
     analysis_error: record.analysis_error || null,
     timestamp: capturedAt?.toISOString() || null
   };
@@ -483,6 +484,8 @@ async function saveTestImageCapture(filename, filePath, result, zoneId, captured
     confidence,
     severity: result?.severity || null,
     notes: result?.notes || null,
+    needs_review: result?.needs_review === true,
+    analysis_method: result?.analysis_method || null,
     original_storage_path: originalImage.storagePath,
     original_image_url: originalImage.downloadUrl,
     annotated_storage_path: annotatedImage?.storagePath || null,
@@ -668,6 +671,8 @@ router.post('/capture-analyze', async (req, res) => {
       confidence,
       severity: result?.severity || null,
       notes: result?.notes || null,
+      needs_review: result?.needs_review === true,
+      analysis_method: result?.analysis_method || null,
       original_storage_path: originalImage.storagePath,
       original_image_url: originalImage.downloadUrl,
       annotated_storage_path: annotatedImage?.storagePath || null,

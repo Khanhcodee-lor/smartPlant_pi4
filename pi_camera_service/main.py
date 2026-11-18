@@ -32,7 +32,13 @@ def main() -> int:
         logger = configure_logging(config.log_dir)
         firebase = FirebaseService(config)
         firebase.initialize()
-        camera = CameraService(ustreamer_url=config.ustreamer_url, dry_run=config.dry_run)
+        camera = CameraService(
+            ustreamer_url=config.ustreamer_url,
+            dry_run=config.dry_run,
+            burst_frames=config.capture_burst_frames,
+            burst_interval_seconds=config.capture_burst_interval_seconds,
+            max_image_bytes=config.max_image_bytes,
+        )
         camera.start()
         processor = CaptureProcessor(config, firebase, camera, DiseaseAnalyzer(), logger)
         stop_event = threading.Event()

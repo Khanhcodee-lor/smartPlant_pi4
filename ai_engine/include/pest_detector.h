@@ -38,7 +38,10 @@ private:
     
     cv::dnn::Net net_;
     bool model_loaded_ = false;
+    bool use_compat_ = false;
     float confidence_threshold_ = 0.35f;
+    bool enhance_enabled_ = true;
+    float sharpen_strength_ = 0.3f;
 
     struct PestInfo {
         std::string name;
@@ -47,6 +50,21 @@ private:
     };
 
     std::vector<PestInfo> pest_database_;
+
+    struct Detection {
+        int class_id;
+        float confidence;
+        cv::Rect box;
+        bool enhanced = false;
+        bool needs_review = false;
+        bool center_only = false;
+        bool full_frame_enhanced = false;
+        float full_frame_confidence = -1.0f;
+        int alternate_class_id = -1;
+        float alternate_confidence = 0.0f;
+    };
+
+    std::vector<Detection> detect_region(const cv::Mat& frame, const cv::Rect& region, bool sharpen);
     
     // Hàm phụ trợ YOLOv8
     void draw_label(cv::Mat& input_image, const std::string& label, int left, int top);

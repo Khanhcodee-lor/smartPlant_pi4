@@ -266,6 +266,7 @@ int main(int argc, char* argv[]) {
                         {"pest_type", "Không phát hiện bệnh"},
                         {"confidence", 0.0},
                         {"severity", "low"},
+                        {"needs_review", true},
                         {"notes", "Model chưa nhận diện được lá hoặc bệnh; hãy chụp gần và rõ hơn. Kết quả này không xác nhận cây khỏe mạnh."}
                     };
                 }

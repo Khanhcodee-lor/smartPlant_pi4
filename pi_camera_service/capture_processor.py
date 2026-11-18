@@ -115,6 +115,8 @@ class CaptureProcessor:
             "disease_class": first["disease_class"],
             "severity": first.get("severity", "low"),
             "notes": first.get("notes", ""),
+            "needs_review": first.get("needs_review", False),
+            "analysis_method": first.get("analysis_method", "full_frame"),
             "confidence": first["confidence"],
             "snapshotUrl": snapshot_url,
             "capturedAt": captured_at,
@@ -140,6 +142,8 @@ class CaptureProcessor:
                     "confidence": max(0.0, min(1.0, confidence)),
                     "severity": str(item.get("severity") or "low"),
                     "notes": str(item.get("notes") or ""),
+                    "needs_review": item.get("needs_review") is True,
+                    "analysis_method": str(item.get("analysis_method") or "full_frame"),
                 }
             )
         if not normalized:

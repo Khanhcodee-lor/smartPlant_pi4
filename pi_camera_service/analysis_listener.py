@@ -199,7 +199,10 @@ class AnalysisWorker:
             command.get("captured_at") or command.get("created_at")
         )
         snapshot_url = str(command.get("image_url") or image_storage_path).strip()
-        detections = [{"disease_class": disease_class, "confidence": confidence}]
+        needs_review = result.get("needs_review") is True
+        analysis_method = str(result.get("analysis_method") or "full_frame")
+        detections = [{"disease_class": disease_class, "confidence": confidence,
+                       "needs_review": needs_review, "analysis_method": analysis_method}]
         return {
             "request_id": request_id,
             "plant_id": plant_id,
@@ -212,6 +215,8 @@ class AnalysisWorker:
             "severity": severity,
             "treatment": treatment,
             "notes": treatment,
+            "needs_review": needs_review,
+            "analysis_method": analysis_method,
             "captured_at": captured_at,
             "captured_at_iso": captured_at,
             "processed_at": _utc_now(),

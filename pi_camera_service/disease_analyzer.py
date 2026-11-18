@@ -30,6 +30,8 @@ class DiseaseAnalyzer:
                 "confidence": max(0.0, min(1.0, confidence)),
                 "severity": str(result.get("severity") or "low"),
                 "notes": str(result.get("notes") or ""),
+                "needs_review": result.get("needs_review") is True,
+                "analysis_method": str(result.get("analysis_method") or "full_frame"),
                 "image_b64": result.get("image_b64"),
             }]
         except Exception as exc:
