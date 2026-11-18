@@ -1,10 +1,17 @@
 #include "pest_detector.h"
+#include "yolo_compat.h"
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <filesystem>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <ctime>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -95,19 +102,29 @@ std::string remove_vietnamese_accents(const std::string& str) {
 PestDetector::PestDetector(const std::string& model_path)
     : rng_(std::random_device{}())
 {
-    // Danh sách 10 lớp bệnh trên lá cà chua tương ứng với model Tomato-Leaves YOLOv8
+    // Must follow the `names` metadata embedded in model/best.onnx.
     pest_database_ = {
-        {"Đốm lá vi khuẩn (Bacterial Spot)", "high",     "Vết đốm sũng nước trên lá, cần phun thuốc diệt khuẩn"},
-        {"Sương mai sớm (Early Blight)",    "medium",   "Đốm nâu vòng đồng tâm trên lá già"},
+        {"Cháy sớm (Early Blight)",         "medium",   "Đốm nâu vòng đồng tâm trên lá già"},
+        {"Đốm lá Septoria",                  "medium",   "Nhiều đốm tròn nhỏ viền sẫm màu"},
+        {"Đốm lá vi khuẩn (Bacterial Spot)", "high",     "Vết đốm sẫm màu trên lá"},
+        {"Cây khỏe mạnh (Healthy)",          "low",      "Model nhận diện lá có vẻ khỏe mạnh"},
         {"Sương mai muộn (Late Blight)",    "critical", "Lá và thân bị ủng nước màu nâu đen, lây lan rất nhanh"},
         {"Mốc lá (Leaf Mold)",               "medium",   "Mặt trên lá vàng nhạt, mặt dưới có lớp mốc xám"},
-        {"Đốm lá Septoria",                  "medium",   "Nhiều đốm tròn nhỏ viền sẫm màu"},
+        {"Virus khảm (Mosaic Virus)",        "critical", "Lá loang lổ xanh vàng, biến dạng méo mó"},
         {"Nhện đỏ (Spider Mites)",           "high",     "Mặt dưới lá có tơ mỏng và đốm vàng lấm chấm"},
         {"Đốm mắt cua (Target Spot)",        "medium",   "Vết bệnh hình tròn nhiều quầng đồng tâm"},
-        {"Xoăn vàng lá (Yellow Leaf Curl)",  "critical", "Lá ngọn co xoăn, vàng viền, cây chùn ngọn"},
-        {"Virus khảm (Mosaic Virus)",        "critical", "Lá loang lổ xanh vàng, biến dạng méo mó"},
-        {"Cây khỏe mạnh (Healthy)",          "low",      "Lá xanh tốt, không phát hiện dấu hiệu sâu bệnh"}
+        {"Virus vàng lá (Yellow Virus)",     "critical", "Lá có thể vàng và biến dạng; cần kiểm tra thêm"}
     };
+
+    if (const char* configured = std::getenv("YOLO_CONFIDENCE_THRESHOLD")) {
+        char* end = nullptr;
+        const float value = std::strtof(configured, &end);
+        if (end != configured && *end == '\0' && std::isfinite(value) && value >= 0.0f && value <= 1.0f) {
+            confidence_threshold_ = value;
+        } else {
+            std::cerr << "[AI] YOLO_CONFIDENCE_THRESHOLD không hợp lệ; dùng 0.35\n";
+        }
+    }
 
     std::vector<std::string> candidates = {
         model_path,
@@ -193,14 +210,15 @@ cv::Mat PestDetector::get_test_image() {
 }
 
 nlohmann::json PestDetector::detect_image(const std::string& image_path, int zone_id) {
+    if (!model_loaded_) {
+        throw std::runtime_error("Không nạp được model YOLO.");
+    }
     if (!fs::exists(image_path)) {
-        std::cerr << "[AI] Không tìm thấy file ảnh: " << image_path << "\n";
-        return nullptr;
+        throw std::runtime_error("Không tìm thấy file ảnh: " + image_path);
     }
     cv::Mat frame = cv::imread(image_path);
     if (frame.empty()) {
-        std::cerr << "[AI] Không thể đọc ảnh: " << image_path << "\n";
-        return nullptr;
+        throw std::runtime_error("Không thể đọc ảnh: " + image_path);
     }
     std::cout << "[AI 🔍] Bắt đầu phân tích ảnh theo yêu cầu: " << image_path << "\n";
     return detect_mat(frame, zone_id, true); // include base64 for on-demand UI
@@ -245,18 +263,48 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         return nullptr;
     }
 
-    // 3. Chuẩn bị ảnh cho YOLOv8 (resize 640x640)
+    // A disconnected or severely overexposed camera can produce an almost
+    // uniform frame. The model may still assign it a confident "healthy"
+    // label, even though there is no visible leaf to evaluate.
+    cv::Scalar mean, deviation;
+    cv::meanStdDev(frame, mean, deviation);
+    if (std::max({deviation[0], deviation[1], deviation[2]}) < 2.0) {
+        std::cout << "[AI] Ảnh gần như không có chi tiết; không thể đánh giá.\n";
+        return nullptr;
+    }
+
+    // Match the model's fixed 640x640 letterbox preprocessing without stretching
+    // webcam frames. Retain the padding and scale to map boxes back to the photo.
+    constexpr int input_size = 640;
+    const float scale = std::min(input_size / static_cast<float>(frame.cols),
+                                 input_size / static_cast<float>(frame.rows));
+    const int resized_width = std::max(1, static_cast<int>(std::round(frame.cols * scale)));
+    const int resized_height = std::max(1, static_cast<int>(std::round(frame.rows * scale)));
+    const int pad_left = (input_size - resized_width) / 2;
+    const int pad_top = (input_size - resized_height) / 2;
+    cv::Mat resized, letterboxed;
+    cv::resize(frame, resized, cv::Size(resized_width, resized_height));
+    cv::copyMakeBorder(resized, letterboxed, pad_top, input_size - resized_height - pad_top,
+                       pad_left, input_size - resized_width - pad_left,
+                       cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
     cv::Mat blob;
-    cv::dnn::blobFromImage(frame, blob, 1.0 / 255.0, cv::Size(640, 640), cv::Scalar(), true, false);
+    cv::dnn::blobFromImage(letterboxed, blob, 1.0 / 255.0, cv::Size(), cv::Scalar(), true, false);
     net_.setInput(blob);
 
     // 4. Chạy dự đoán (Forward)
     std::vector<cv::Mat> outputs;
-    net_.forward(outputs, net_.getUnconnectedOutLayersNames());
+    try {
+        net_.forward(outputs, net_.getUnconnectedOutLayersNames());
+    } catch (const cv::Exception& error) {
+        std::cerr << "[AI] OpenCV không chạy được đầu ra model; thử chế độ tương thích: "
+                  << error.what() << "\n";
+        outputs = {forward_yolo_compat(net_, blob, confidence_threshold_)};
+    }
 
     // 5. Parse output YOLOv8 (Output shape: [1, classes + 4, 8400])
-    if (outputs.size() == 0 || outputs[0].dims != 3) {
-        return nullptr;
+    if (outputs.empty() || outputs[0].dims != 3 || outputs[0].type() != CV_32F ||
+        outputs[0].size[0] != 1 || outputs[0].size[1] != static_cast<int>(pest_database_.size()) + 4) {
+        throw std::runtime_error("Model trả về dữ liệu nhận diện không đúng định dạng.");
     }
     
     cv::Mat out = outputs[0];
@@ -271,9 +319,6 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
     std::vector<cv::Rect> boxes;
     float* data = (float*)out_transposed.data;
 
-    float x_factor = frame.cols / 640.0f;
-    float y_factor = frame.rows / 640.0f;
-
     for (int i = 0; i < rows; ++i) {
         float* classes_scores = data + 4;
         cv::Mat scores(1, pest_database_.size(), CV_32F, classes_scores);
@@ -281,35 +326,42 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         double max_class_score;
         cv::minMaxLoc(scores, 0, &max_class_score, 0, &class_id);
 
-        if (max_class_score > 0.60) {
-            confidences.push_back(max_class_score);
-            class_ids.push_back(class_id.x);
-
+        if (max_class_score >= confidence_threshold_) {
             float x = data[0];
             float y = data[1];
             float w = data[2];
             float h = data[3];
-            int left = int((x - 0.5 * w) * x_factor);
-            int top = int((y - 0.5 * h) * y_factor);
-            int width = int(w * x_factor);
-            int height = int(h * y_factor);
-            boxes.push_back(cv::Rect(left, top, width, height));
+            int left = static_cast<int>((x - 0.5f * w - pad_left) / scale);
+            int top = static_cast<int>((y - 0.5f * h - pad_top) / scale);
+            int right = static_cast<int>((x + 0.5f * w - pad_left) / scale);
+            int bottom = static_cast<int>((y + 0.5f * h - pad_top) / scale);
+            left = std::clamp(left, 0, frame.cols);
+            right = std::clamp(right, 0, frame.cols);
+            top = std::clamp(top, 0, frame.rows);
+            bottom = std::clamp(bottom, 0, frame.rows);
+            if (right > left && bottom > top) {
+                confidences.push_back(static_cast<float>(max_class_score));
+                class_ids.push_back(class_id.x);
+                boxes.emplace_back(left, top, right - left, bottom - top);
+            }
         }
         data += dimensions;
     }
 
     // NMS (Non-Maximum Suppression)
     std::vector<int> indices;
-    cv::dnn::NMSBoxes(boxes, confidences, 0.60, 0.4, indices);
+    cv::dnn::NMSBoxes(boxes, confidences, confidence_threshold_, 0.4f, indices);
 
     if (indices.empty()) {
-        std::cout << "[AI] Quét ảnh: Không phát hiện sâu bệnh (hoặc cây khỏe mạnh) ✅\n";
-        return nullptr; // Không phát hiện gì
+        std::cout << "[AI] Không có nhận diện vượt ngưỡng tin cậy.\n";
+        return nullptr;
     }
 
     // 6. Vẽ Bounding Box cho tất cả các đối tượng phát hiện được
-    int best_class_id = 0;
+    constexpr int healthy_class_id = 3;
+    int best_class_id = healthy_class_id;
     float best_conf = 0.0f;
+    bool found_disease = false;
 
     for (int idx : indices) {
         cv::Rect box = boxes[idx];
@@ -318,9 +370,11 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         
         if (class_id >= (int)pest_database_.size()) class_id = 0;
         
-        if (conf > best_conf) {
+        const bool is_disease = class_id != healthy_class_id;
+        if ((is_disease && !found_disease) || (is_disease == found_disease && conf > best_conf)) {
             best_conf = conf;
             best_class_id = class_id;
+            found_disease = is_disease;
         }
 
         auto pest = pest_database_[class_id];
@@ -337,6 +391,10 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
     }
 
     auto main_pest = pest_database_[best_class_id];
+    std::string notes = main_pest.notes;
+    if (best_conf < 0.60f) {
+        notes += ". Độ tin cậy còn thấp; hãy chụp rõ hơn và kiểm tra lại";
+    }
 
     // Tạo tên file ảnh duy nhất theo timestamp
     auto now = std::chrono::system_clock::now();
@@ -370,7 +428,7 @@ nlohmann::json PestDetector::detect_mat(cv::Mat& frame, int zone_id, bool includ
         {"confidence", std::round(best_conf * 100.0) / 100.0},
         {"zone_id",    zone_id},
         {"severity",   main_pest.severity},
-        {"notes",      main_pest.notes},
+        {"notes",      notes},
         {"image_path", image_url}
     };
 

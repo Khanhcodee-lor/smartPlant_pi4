@@ -3,6 +3,7 @@ const axios = require('axios');
 const { execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const { getFirebaseServices } = require('../firebase');
+const { getCapturePreviewUrl } = require('../storagePreview');
 const router = express.Router();
 
 function execV4l2(args) {
@@ -37,26 +38,6 @@ function getCaptureDatabase() {
     throw new Error('FIREBASE_DATABASE_URL is required for Raspberry Pi camera capture.');
   }
   return database;
-}
-
-async function getCapturePreviewUrl(capture) {
-  const storedUrl = capture.snapshot_url || capture.snapshotUrl || null;
-  if (storedUrl && /^https?:\/\//i.test(storedUrl)) return storedUrl;
-
-  const storagePath = capture.image_path || storedUrl;
-  if (!storagePath) return null;
-
-  try {
-    const { bucket } = getFirebaseServices();
-    const [signedUrl] = await bucket.file(storagePath).getSignedUrl({
-      action: 'read',
-      expires: Date.now() + 60 * 60 * 1000
-    });
-    return signedUrl;
-  } catch (urlError) {
-    console.warn('[Camera] Không tạo được URL xem ảnh:', urlError.message);
-    return null;
-  }
 }
 
 function getLatestCompletedCapture(captures) {

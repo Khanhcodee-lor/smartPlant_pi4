@@ -103,6 +103,8 @@ class FirebaseService:
             "image_path": data.get("image_path"),
             "original_storage_path": data.get("image_path"),
             "original_image_url": data.get("snapshot_url") or data.get("snapshotUrl"),
+            "annotated_storage_path": data.get("annotated_storage_path"),
+            "annotated_image_url": data.get("annotated_image_url"),
         }
 
         try:

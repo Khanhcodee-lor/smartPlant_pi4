@@ -153,11 +153,11 @@ node). Điều khiển bơm đọc/ghi tại `plant/{PLANT_ID}/control/pump` (m�
 thủ công ghi `mode`, `enabled`, `manual_override`, `updated_at`, `updated_ts` và
 `updated_by=web` để bộ điều khiển thiết bị nhận lệnh.
 
-Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào RTDB `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` nhận lệnh, chụp bằng Picamera2, tải ảnh lên Storage và cập nhật trạng thái/kết quả RTDB tại `plants/{PLANT_ID}/plant_captures/{request_id}` để app theo dõi. Kết quả phân tích cũng được mirror sang Firestore cùng đường dẫn để lịch sử bệnh và trợ lý AI trên web đọc qua `/api/pests/history`. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
+Nút **Chụp bằng camera Pi** trên ứng dụng gửi lệnh qua `POST /api/camera/capture`. Server ghi lệnh `status: 1` vào RTDB `plants/{PLANT_ID}/commands/capture`; Pi chạy `pi_camera_service` nhận lệnh, lấy ảnh webcam từ ustreamer, phân tích bằng model YOLO, tải ảnh lên Storage và cập nhật trạng thái/kết quả RTDB tại `plants/{PLANT_ID}/plant_captures/{request_id}` để app theo dõi. Kết quả phân tích cũng được mirror sang Firestore cùng đường dẫn để lịch sử bệnh và trợ lý AI trên web đọc qua `/api/pests/history`. Cài và bật service trên Pi theo [hướng dẫn pi_camera_service](pi_camera_service/README.md); cần đặt cùng `PLANT_ID`, `FIREBASE_DATABASE_URL` và bucket trong cấu hình của server và service Pi.
 
 Khi Pi nhận commit thay đổi `server/package.json`, `auto_update.sh` chạy `npm install`. Web server Node.js do `smart-plant-engine` khởi chạy và quản lý; script cập nhật sẽ xóa tiến trình PM2 `smart-plant-server` cũ nếu còn sót rồi restart engine. Không chạy thêm Node server riêng bằng PM2 vì sẽ tranh cổng 3000. Dữ liệu được ghi như sau:
 
-- Storage: `plant-captures/{captureId}/original.<ext>` cho ảnh camera và ảnh test từ thẻ nhớ; thêm `ai-annotated.jpg` khi AI phát hiện sâu bệnh.
+- Storage: ảnh do camera service chụp được lưu ở `detections/snapshots/`, kèm ảnh có khung nếu model nhận diện được lá. Ảnh phân tích từ thẻ nhớ dùng `plant-captures/{captureId}/original.<ext>` và có thể có thêm `ai-annotated.jpg`.
 - Firestore: `plants/{plant_id}/plant_captures/{captureId}`, mặc định `plants/tomato_001/plant_captures/{captureId}`. Tài liệu cha lưu `plant_id` và `name`; mỗi tài liệu ảnh lưu thêm `plant_id` cùng `source` (`camera`, `pi_test_image` hoặc `sqlite_history`), `source_location`, `source_filename` và `source_path` với ảnh test, `status` (`detected`, `no_detection`, `analysis_failed`), `captured_at` (Firestore Timestamp), `captured_at_iso` (UTC), `capture_date` và `capture_time` (giờ Việt Nam), `zone_id`, `pest_type`, `confidence`, `severity`, `notes`, đường dẫn Storage và URL ảnh. Khi API lịch sử chạy, các tài liệu cũ ở collection gốc `plant_captures` được chuyển vào cây tương ứng, mặc định `tomato_001`.
 - Cả trường hợp không phát hiện bệnh vẫn lưu ảnh và một tài liệu Firestore. Lỗi AI được ghi vào `analysis_error`; lỗi khi lưu ảnh chú thích được ghi vào `annotation_storage_error`.
 - Lịch sử bệnh trên dashboard gộp các lần phát hiện từ SQLite và Firestore. Các dòng SQLite cũ được đồng bộ lên Firestore theo ID ổn định khi API lịch sử chạy; các lần chụp mới lưu ID tài liệu Firebase vào SQLite để tránh hiện trùng. Nút xóa lịch sử xóa các bản ghi phát hiện ở cả hai nơi.
@@ -346,5 +346,5 @@ cmake .. && make -j$(nproc)
 
 - Database SQLite được lưu tại `server/db/smart_plant.db` (tự tạo khi khởi động)
 - `npm run seed` sẽ xóa dữ liệu cũ và tạo dữ liệu mẫu mới
-- AI Engine hiện đang ở chế độ **giả lập** — thay thế `SensorSimulator` và `PestDetector` bằng code đọc sensor/camera thật khi tích hợp hardware
+- `SensorSimulator` vẫn giả lập số đo; ảnh chụp theo yêu cầu được phân tích bằng model YOLO cho lá cà chua
 - Dashboard tự cập nhật mỗi 30 giây

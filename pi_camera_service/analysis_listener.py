@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import signal
-import subprocess
 import tempfile
 import threading
 import time
@@ -23,10 +21,12 @@ if __package__ in (None, ""):
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from pi_camera_service.config import Config, ConfigurationError
+    from pi_camera_service.engine_runner import default_engine_binary, run_engine
     from pi_camera_service.firebase_service import FirebaseService
     from pi_camera_service.logger_config import configure_logging
 else:
     from .config import Config, ConfigurationError
+    from .engine_runner import default_engine_binary, run_engine
     from .firebase_service import FirebaseService
     from .logger_config import configure_logging
 
@@ -53,12 +53,7 @@ class AnalysisWorker:
         self.logger = logger
         project_root = Path(__file__).resolve().parent.parent
         self.ai_engine_dir = project_root / "ai_engine"
-        self.ai_engine_binary = ai_engine_binary or Path(
-            os.getenv(
-                "AI_ENGINE_BINARY",
-                str(self.ai_engine_dir / "build" / "smart_plant_engine"),
-            )
-        ).expanduser()
+        self.ai_engine_binary = ai_engine_binary or default_engine_binary()
         self.temp_dir = temp_dir or Path(
             os.getenv("ANALYZE_TEMP_DIR", "/tmp/ai_analysis")
         ).expanduser()
@@ -177,35 +172,7 @@ class AnalysisWorker:
             raise ValueError("Uploaded file is not a JPEG or PNG image")
 
     def _run_inference(self, image_path: Path) -> dict[str, Any]:
-        if not self.ai_engine_binary.is_file():
-            raise FileNotFoundError(
-                f"AI engine binary not found: {self.ai_engine_binary}"
-            )
-        if not os.access(self.ai_engine_binary, os.X_OK):
-            raise PermissionError(f"AI engine binary is not executable: {self.ai_engine_binary}")
-
-        completed = subprocess.run(
-            [str(self.ai_engine_binary), "--analyze", str(image_path)],
-            cwd=str(self.ai_engine_dir),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if completed.returncode != 0:
-            error = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(f"AI engine exited {completed.returncode}: {error[-1000:]}")
-
-        json_line = next(
-            (line.strip() for line in reversed(completed.stdout.splitlines()) if line.strip().startswith("{")),
-            None,
-        )
-        if json_line is None:
-            raise RuntimeError("AI engine did not return a JSON result")
-        result = json.loads(json_line)
-        if not isinstance(result, dict):
-            raise RuntimeError("AI engine returned an invalid result")
-        return result
+        return run_engine(image_path, self.ai_engine_binary)
 
     def _build_capture_record(
         self,

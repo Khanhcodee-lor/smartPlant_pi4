@@ -258,15 +258,23 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--analyze" && i + 1 < argc) {
-            std::string img_path = argv[i + 1];
-            PestDetector detector;
-            auto result = detector.detect_image(img_path);
-            if (!result.is_null()) {
+            try {
+                PestDetector detector;
+                auto result = detector.detect_image(argv[i + 1]);
+                if (result.is_null()) {
+                    result = {
+                        {"pest_type", "Không phát hiện bệnh"},
+                        {"confidence", 0.0},
+                        {"severity", "low"},
+                        {"notes", "Model chưa nhận diện được lá hoặc bệnh; hãy chụp gần và rõ hơn. Kết quả này không xác nhận cây khỏe mạnh."}
+                    };
+                }
                 std::cout << result.dump() << std::endl;
-            } else {
-                std::cout << "{\"pest_type\":\"Cây khỏe mạnh (Healthy)\",\"confidence\":1.0,\"severity\":\"low\",\"notes\":\"Không phát hiện dấu hiệu sâu bệnh trên ảnh này\"}" << std::endl;
+                return 0;
+            } catch (const std::exception& error) {
+                std::cerr << "[AI] Không phân tích được ảnh: " << error.what() << std::endl;
+                return 1;
             }
-            return 0;
         }
     }
 

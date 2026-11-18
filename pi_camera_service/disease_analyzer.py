@@ -1,8 +1,12 @@
-"""Disease analysis abstraction with a safe placeholder implementation."""
+"""Analyze webcam snapshots with the Raspberry Pi's YOLO engine."""
 
 from __future__ import annotations
 
+import math
+from pathlib import Path
 from typing import Any
+
+from .engine_runner import run_engine
 
 
 class AnalyzerError(RuntimeError):
@@ -10,28 +14,23 @@ class AnalyzerError(RuntimeError):
 
 
 class DiseaseAnalyzer:
-    """Analyze an image. Replace `_run_inference` when adding a real model."""
+    """Return webcam detections using the same engine as mobile uploads."""
 
-    def load_model(self) -> None:
-        """Load a model once; the sample analyzer has no model to load."""
-
-    def _run_inference(self, image_path: str) -> list[dict[str, Any]]:
-        return [{"disease_class": "Không phát hiện bệnh", "confidence": 0.0}]
+    def __init__(self, ai_engine_binary: Path | None = None) -> None:
+        self.ai_engine_binary = ai_engine_binary
 
     def analyze(self, image_path: str) -> list[dict[str, Any]]:
-        """Return normalized detections and keep model failures local to a capture."""
         try:
-            results = self._run_inference(image_path)
+            result = run_engine(Path(image_path), self.ai_engine_binary)
+            confidence = float(result.get("confidence", 0.0))
+            if not math.isfinite(confidence):
+                raise ValueError("Invalid confidence from AI engine")
+            return [{
+                "disease_class": str(result.get("disease_class") or result["pest_type"]),
+                "confidence": max(0.0, min(1.0, confidence)),
+                "severity": str(result.get("severity") or "low"),
+                "notes": str(result.get("notes") or ""),
+                "image_b64": result.get("image_b64"),
+            }]
         except Exception as exc:
             raise AnalyzerError(f"Disease analysis failed: {exc}") from exc
-        normalized: list[dict[str, Any]] = []
-        for item in results:
-            disease_class = str(item.get("disease_class", "Không phát hiện bệnh"))
-            try:
-                confidence = float(item.get("confidence", 0.0))
-            except (TypeError, ValueError):
-                confidence = 0.0
-            normalized.append(
-                {"disease_class": disease_class, "confidence": max(0.0, min(1.0, confidence))}
-            )
-        return normalized or [{"disease_class": "Không phát hiện bệnh", "confidence": 0.0}]

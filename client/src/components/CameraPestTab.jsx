@@ -144,7 +144,7 @@ export default function CameraPestTab() {
     setAnalysisResult({
       pest_type: disease,
       confidence: Number(confidence) || 0,
-      notes: 'Nhận diện mới nhất đã được lưu từ camera Pi.',
+      notes: detection.notes || capture.notes || 'Nhận diện mới nhất đã được lưu từ camera Pi.',
       firebase_capture_id: capture.request_id || capture.capture_id || null,
       capture_source: 'pi_camera'
     });
@@ -321,7 +321,8 @@ export default function CameraPestTab() {
         throw new Error(request?.error || 'Không gửi được lệnh chụp tới Raspberry Pi.');
       }
 
-      const deadline = Date.now() + 120000;
+      // Inference can take up to two minutes, in addition to capture and uploads.
+      const deadline = Date.now() + 180000;
       let result = null;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -336,7 +337,7 @@ export default function CameraPestTab() {
       }
 
       if (result?.status !== 'completed' || !result.capture) {
-        throw new Error('Raspberry Pi chưa hoàn tất chụp ảnh sau 2 phút. Vui lòng thử lại.');
+        throw new Error('Raspberry Pi chưa hoàn tất phân tích sau 3 phút. Hãy kiểm tra trạng thái dịch vụ camera.');
       }
 
       const capture = result.capture;
@@ -349,10 +350,11 @@ export default function CameraPestTab() {
       setAnalysisResult({
         pest_type: disease,
         confidence: Number(confidence) || 0,
-        notes: 'Ảnh được chụp trực tiếp bằng camera trên Raspberry Pi.',
+        notes: detection.notes || capture.notes || 'Ảnh được chụp trực tiếp bằng camera trên Raspberry Pi.',
         firebase_capture_id: request.request_id,
         capture_source: 'pi_camera'
       });
+      await refreshHistoryAfterAnalysis();
     } catch (error) {
       setIsLiveStreamMode(false);
       setCaptureError(error.message || 'Không thể chụp ảnh bằng camera Raspberry Pi.');
@@ -399,6 +401,7 @@ export default function CameraPestTab() {
                     ? 'Đang xem ảnh mẫu từ thẻ nhớ'
                     : 'Chưa có ảnh nhận diện đã lưu'}
             </p>
+            <p className="mt-1 text-xs text-slate-500">Đưa lá cà chua lại gần, đủ sáng và giữ yên để ảnh rõ nét trước khi chụp. Nút zoom chỉ phóng to khung xem, không làm ảnh AI rõ hơn.</p>
           </div>
           
           <div className="flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
@@ -488,7 +491,8 @@ export default function CameraPestTab() {
               <Sparkles className="w-5 h-5 text-emerald-600 shrink-0" />
               <div>
                 <p className="text-xs font-bold text-slate-900">
-                  {analysisResult.capture_source === 'pi_camera' ? 'Ảnh từ camera Pi:' : 'Kết quả phân tích:'} <span className="text-emerald-700">{analysisResult.pest_type}</span> ({Math.round(analysisResult.confidence * 100)}%)
+                  {analysisResult.capture_source === 'pi_camera' ? 'Ảnh từ camera Pi:' : 'Kết quả phân tích:'} <span className="text-emerald-700">{analysisResult.pest_type}</span>
+                  {!/không phát hiện|no detection/i.test(analysisResult.pest_type || '') && Number.isFinite(Number(analysisResult.confidence)) && ` (${Math.round(Number(analysisResult.confidence) * 100)}%)`}
                 </p>
                 <p className="text-[11px] text-slate-600 mt-0.5">{analysisResult.notes}</p>
                 {analysisResult.firebase_capture_id && (
@@ -624,8 +628,8 @@ export default function CameraPestTab() {
           {analyzing && (
             <div className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm flex flex-col items-center justify-center text-white z-20 animate-fade-in-up">
               <Loader2 className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
-              <p className="font-bold text-sm tracking-wide">Đang chờ Raspberry Pi chụp ảnh...</p>
-              <p className="text-xs text-slate-300 mt-1">Pi sẽ nhận lệnh, chụp bằng Picamera2 và gửi ảnh lên Firebase</p>
+              <p className="font-bold text-sm tracking-wide">Đang phân tích ảnh trên Raspberry Pi...</p>
+              <p className="text-xs text-slate-300 mt-1">Vui lòng chờ Pi xử lý và lưu kết quả.</p>
             </div>
           )}
 
@@ -675,7 +679,7 @@ export default function CameraPestTab() {
                 <button
                   onClick={() => setSelectedImage({
                     url: isLiveStreamMode ? '/api/camera/stream' : activeTestImage,
-                    title: analysisResult ? `${analysisResult.pest_type} (${Math.round((analysisResult.confidence || 0) * 100)}%)` : 'Ảnh Camera / Nhận diện gần nhất',
+                    title: analysisResult ? `${analysisResult.pest_type}${!/không phát hiện|no detection/i.test(analysisResult.pest_type || '') && Number.isFinite(Number(analysisResult.confidence)) ? ` (${Math.round(Number(analysisResult.confidence) * 100)}%)` : ''}` : 'Ảnh Camera / Nhận diện gần nhất',
                     time: new Date().toLocaleString('vi-VN'),
                     notes: analysisResult?.notes || 'Ảnh từ camera thời gian thực.'
                   })}

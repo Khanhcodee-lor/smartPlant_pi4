@@ -4,7 +4,7 @@
 #include <random>
 #include <string>
 #include <vector>
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
 #include <opencv2/dnn.hpp>
 
 /**
@@ -32,13 +32,13 @@ public:
     nlohmann::json detect_mat(cv::Mat& frame, int zone_id = 1, bool include_b64 = false);
 
     void set_detection_probability(double prob);
-
 private:
     std::mt19937 rng_;
     double detection_probability_ = 0.3;
     
     cv::dnn::Net net_;
     bool model_loaded_ = false;
+    float confidence_threshold_ = 0.35f;
 
     struct PestInfo {
         std::string name;

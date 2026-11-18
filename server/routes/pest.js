@@ -5,6 +5,7 @@ const fs = require('fs');
 const { randomUUID } = require('crypto');
 const { getDb } = require('../db/database');
 const { getFirebaseServices } = require('../firebase');
+const { getCapturePreviewUrl } = require('../storagePreview');
 
 function getTestImagesDir() {
   const candidates = [
@@ -129,7 +130,7 @@ function analyzeImage(binary, filePath) {
 
 function hasPestDetection(result) {
   const pestType = String(result?.pest_type || '').trim();
-  return Boolean(pestType && !/healthy|cây khỏe mạnh/i.test(pestType));
+  return Boolean(pestType && !/healthy|no disease|no detection|không phát hiện|không bệnh|không có bệnh|khỏe mạnh/i.test(pestType));
 }
 
 function getCaptureTimeFields(date) {
@@ -357,7 +358,7 @@ async function syncSqliteRowToFirebase(db, firestore, row) {
   return captureId;
 }
 
-function mapFirebaseCapture(doc, zoneNames) {
+async function mapFirebaseCapture(doc, zoneNames) {
   const record = doc.data();
   const capturedAt = getCaptureDate(record);
   const pestType = String(record.pest_type || record.disease_class || record.diseaseClass || '').trim();
@@ -380,7 +381,7 @@ function mapFirebaseCapture(doc, zoneNames) {
     pest_type: pestType || null,
     confidence: confidence !== null && confidence !== undefined && confidence !== '' &&
       Number.isFinite(Number(confidence)) ? Number(confidence) : null,
-    image_path: record.annotated_image_url || record.original_image_url || record.image_path || null,
+    image_path: await getCapturePreviewUrl(record),
     zone_id: record.zone_id ?? null,
     zone_name: record.zone_name || zoneNames.get(String(record.zone_id ?? '')) || null,
     severity: record.severity || null,
@@ -790,9 +791,9 @@ router.get('/history', async (req, res) => {
       }
 
       const firebaseDocs = await getCaptureDocuments(firestore, Timestamp, cutoff);
-      const firebaseItems = firebaseDocs
-        .map(doc => mapFirebaseCapture(doc, zoneNames))
-        .filter(item => {
+      const firebaseItems = (await Promise.all(
+        firebaseDocs.map(doc => mapFirebaseCapture(doc, zoneNames))
+      )).filter(item => {
           const date = parseDate(item.timestamp);
           return date && date >= cutoff;
         });

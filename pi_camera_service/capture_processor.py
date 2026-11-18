@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import logging
+import math
 import re
 import time
 from datetime import datetime, timezone
@@ -65,12 +67,14 @@ class CaptureProcessor:
             filename = self._filename(request_id)
             image_path = self.config.capture_dir / filename
             self.camera.capture(image_path)
-            detections = self._normalize_detections(self.analyzer.analyze(str(image_path)))
+            raw_detections = self.analyzer.analyze(str(image_path))
+            detections = self._normalize_detections(raw_detections)
             storage_path = f"detections/snapshots/{filename}"
             snapshot_url = self._upload_with_retry(image_path, storage_path)
             capture_data = self._capture_data(
                 request_id, captured_at, snapshot_url, storage_path, detections
             )
+            self._save_annotation(image_path, raw_detections, capture_data)
             self.firebase.save_capture(request_id, capture_data)
             self.firebase.update_command(
                 {
@@ -108,6 +112,9 @@ class CaptureProcessor:
             "detections": detections,
             "latest_detections": detections,
             "diseaseClass": first["disease_class"],
+            "disease_class": first["disease_class"],
+            "severity": first.get("severity", "low"),
+            "notes": first.get("notes", ""),
             "confidence": first["confidence"],
             "snapshotUrl": snapshot_url,
             "capturedAt": captured_at,
@@ -125,13 +132,38 @@ class CaptureProcessor:
                 confidence = float(item.get("confidence", 0.0))
             except (TypeError, ValueError):
                 confidence = 0.0
+            if not math.isfinite(confidence):
+                confidence = 0.0
             normalized.append(
                 {
                     "disease_class": str(item.get("disease_class", "Không phát hiện bệnh")),
                     "confidence": max(0.0, min(1.0, confidence)),
+                    "severity": str(item.get("severity") or "low"),
+                    "notes": str(item.get("notes") or ""),
                 }
             )
-        return normalized or [{"disease_class": "Không phát hiện bệnh", "confidence": 0.0}]
+        if not normalized:
+            raise ValueError("Analyzer returned no result")
+        return normalized
+
+    def _save_annotation(
+        self, image_path: Path, detections: list[dict[str, Any]], capture_data: dict[str, Any]
+    ) -> None:
+        """Save the boxed image when available; retain the original if upload fails."""
+        annotated = detections[0].get("image_b64") if detections else None
+        if not isinstance(annotated, str) or not annotated.startswith("data:image/jpeg;base64,"):
+            return
+        try:
+            image_bytes = base64.b64decode(annotated.split(",", 1)[1], validate=True)
+            if not image_bytes.startswith(b"\xff\xd8") or len(image_bytes) > self.config.max_image_bytes:
+                raise ValueError("Invalid or oversized annotated JPEG")
+            annotated_path = image_path.with_name(f"{image_path.stem}_annotated.jpg")
+            annotated_path.write_bytes(image_bytes)
+            storage_path = f"detections/snapshots/{annotated_path.name}"
+            capture_data["annotated_image_url"] = self._upload_with_retry(annotated_path, storage_path)
+            capture_data["annotated_storage_path"] = storage_path
+        except Exception as exc:
+            self.logger.warning("Could not save annotated image: %s", exc)
 
     def _upload_with_retry(self, image_path: Path, storage_path: str) -> str:
         last_error: Exception | None = None
