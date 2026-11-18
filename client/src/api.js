@@ -242,6 +242,11 @@ export async function requestPiCameraCapture() {
   }
 }
 
+/** Read the newest saved Raspberry Pi camera capture after a page reload. */
+export async function fetchLatestPiCameraCapture() {
+  return apiFetch('/camera/latest');
+}
+
 /** Read the current state and result for a Raspberry Pi capture request. */
 export async function fetchPiCameraCapture(requestId) {
   try {

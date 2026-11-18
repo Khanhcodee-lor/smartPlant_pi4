@@ -14,6 +14,51 @@ import {
   signOutFromFirebase,
 } from '../firebaseClient';
 
+function renderInlineMarkdown(text, keyPrefix) {
+  const parts = String(text).split(/(\*\*[^*]+\*\*|\*[^*\n]+\*)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return <em key={`${keyPrefix}-${index}`}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+function renderChatMessage(text) {
+  const normalizedText = String(text || '')
+    .replace(/[ \t]+(?=\d{1,2}\.\s)/g, '\n')
+    .replace(/[ \t]+(?=[•-]\s+)/g, '\n');
+
+  return normalizedText.split('\n').map((line, index) => {
+    const listItem = line.match(/^\s*(\d{1,2})\.\s+(.*)$/);
+    if (listItem) {
+      return (
+        <div key={`line-${index}`} className="flex items-start gap-1.5 py-0.5">
+          <span className="shrink-0 font-semibold">{listItem[1]}.</span>
+          <span>{renderInlineMarkdown(listItem[2], `line-${index}`)}</span>
+        </div>
+      );
+    }
+
+    const bulletItem = line.match(/^\s*[•-]\s+(.*)$/);
+    if (bulletItem) {
+      return (
+        <div key={`line-${index}`} className="flex items-start gap-2 py-0.5">
+          <span aria-hidden="true">•</span>
+          <span>{renderInlineMarkdown(bulletItem[1], `line-${index}`)}</span>
+        </div>
+      );
+    }
+
+    if (!line.trim()) return <div key={`line-${index}`} className="h-2" />;
+    return <p key={`line-${index}`}>{renderInlineMarkdown(line, `line-${index}`)}</p>;
+  });
+}
+
 export default function ChatbotTab() {
   const [messages, setMessages] = useState([
     {
@@ -374,7 +419,7 @@ export default function ChatbotTab() {
                   : 'bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200'
               }`}
             >
-              {msg.text}
+              {msg.sender === 'bot' ? renderChatMessage(msg.text) : msg.text}
             </div>
           </div>
         ))}

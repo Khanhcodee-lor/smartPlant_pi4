@@ -27,12 +27,50 @@ function getCaptureRef(database, requestId, plantId = DEFAULT_PLANT_ID) {
   return database.ref(`plants/${plantId}/plant_captures/${requestId}`);
 }
 
+function getCapturesRef(database, plantId = DEFAULT_PLANT_ID) {
+  return database.ref(`plants/${plantId}/plant_captures`);
+}
+
 function getCaptureDatabase() {
   const { database } = getFirebaseServices();
   if (!database) {
     throw new Error('FIREBASE_DATABASE_URL is required for Raspberry Pi camera capture.');
   }
   return database;
+}
+
+async function getCapturePreviewUrl(capture) {
+  const storedUrl = capture.snapshot_url || capture.snapshotUrl || null;
+  if (storedUrl && /^https?:\/\//i.test(storedUrl)) return storedUrl;
+
+  const storagePath = capture.image_path || storedUrl;
+  if (!storagePath) return null;
+
+  try {
+    const { bucket } = getFirebaseServices();
+    const [signedUrl] = await bucket.file(storagePath).getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 60 * 60 * 1000
+    });
+    return signedUrl;
+  } catch (urlError) {
+    console.warn('[Camera] Không tạo được URL xem ảnh:', urlError.message);
+    return null;
+  }
+}
+
+function getLatestCompletedCapture(captures) {
+  return Object.entries(captures || {})
+    .filter(([, capture]) => capture && capture.status === 'completed')
+    .map(([id, capture]) => ({
+      ...capture,
+      request_id: capture.request_id || id
+    }))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.captured_at || left.capturedAt || '') || 0;
+      const rightTime = Date.parse(right.captured_at || right.capturedAt || '') || 0;
+      return rightTime - leftTime;
+    })[0] || null;
 }
 
 /**
@@ -67,6 +105,31 @@ router.get('/snapshot', async (req, res) => {
   } catch (err) {
     console.error('[Camera] Lỗi lấy snapshot:', err.message);
     res.status(502).json({ error: 'Không thể lấy ảnh từ camera' });
+  }
+});
+
+// GET /api/camera/latest — restore the newest completed Pi capture after a page or Pi restart.
+router.get('/latest', async (req, res) => {
+  try {
+    const database = getCaptureDatabase();
+    const capturesRef = getCapturesRef(database);
+    // Read capture metadata and sort locally so this works without adding a
+    // captured_at index to the user's Realtime Database rules.
+    const snapshot = await capturesRef.get();
+    const capture = getLatestCompletedCapture(snapshot.val());
+
+    if (!capture) return res.json({ success: true, capture: null });
+
+    return res.json({
+      success: true,
+      capture: {
+        ...capture,
+        preview_url: await getCapturePreviewUrl(capture)
+      }
+    });
+  } catch (err) {
+    console.error('[Camera] Không đọc được lần chụp Pi mới nhất:', err.message);
+    return res.status(503).json({ success: false, error: err.message });
   }
 });
 
@@ -181,19 +244,7 @@ router.get('/capture/:requestId', async (req, res) => {
     const capture = captureSnapshot.val();
 
     if (capture && capture.status === 'completed') {
-      let imageUrl = capture.snapshot_url || capture.snapshotUrl || null;
-      if ((!imageUrl || !/^https?:\/\//i.test(imageUrl)) && capture.image_path) {
-        try {
-          const { bucket } = getFirebaseServices();
-          const [signedUrl] = await bucket.file(capture.image_path).getSignedUrl({
-            action: 'read',
-            expires: Date.now() + 60 * 60 * 1000
-          });
-          imageUrl = signedUrl;
-        } catch (urlError) {
-          console.warn('[Camera] Không tạo được URL xem ảnh:', urlError.message);
-        }
-      }
+      const imageUrl = await getCapturePreviewUrl(capture);
 
       return res.json({
         success: true,

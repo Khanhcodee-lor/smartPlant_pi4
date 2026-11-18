@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, AlertCircle, Video, Maximize2, X, FolderOpen, Upload, RefreshCw, CheckCircle2, Sparkles, Loader2, ZoomIn, ZoomOut, Sliders, RotateCcw, Trash2 } from 'lucide-react';
-import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture, fetchCameraControls, setCameraControls } from '../api';
+import { fetchPestHistory, fetchTestImages, uploadTestImage, analyzeImage, clearPestHistory, deleteSelectedPestHistory, requestPiCameraCapture, fetchPiCameraCapture, fetchLatestPiCameraCapture, fetchCameraControls, setCameraControls } from '../api';
 
 export default function CameraPestTab() {
   const [history, setHistory] = useState([]);
@@ -16,7 +16,6 @@ export default function CameraPestTab() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [captureError, setCaptureError] = useState(null);
-  const [liveRefreshKey, setLiveRefreshKey] = useState(Date.now());
   const [isLiveStreamMode, setIsLiveStreamMode] = useState(false);
   const fileInputRef = useRef(null);
   const historyRefreshInProgress = useRef(false);
@@ -135,19 +134,50 @@ export default function CameraPestTab() {
     }
   }, []);
 
+  const applyLatestPiCapture = useCallback((capture) => {
+    const detection = capture.detections?.[0] || {};
+    const imageUrl = capture.preview_url || capture.snapshot_url || capture.snapshotUrl || null;
+    const disease = detection.disease_class || capture.diseaseClass || capture.pest_type || 'Không phát hiện bệnh';
+    const confidence = detection.confidence ?? capture.confidence ?? 0;
+
+    setActiveTestImage(imageUrl);
+    setAnalysisResult({
+      pest_type: disease,
+      confidence: Number(confidence) || 0,
+      notes: 'Nhận diện mới nhất đã được lưu từ camera Pi.',
+      firebase_capture_id: capture.request_id || capture.capture_id || null,
+      capture_source: 'pi_camera'
+    });
+    setIsLiveStreamMode(false);
+  }, []);
+
+  const loadLatestPiCapture = useCallback(async () => {
+    const result = await fetchLatestPiCameraCapture();
+    if (!result?.success || !result.capture) return false;
+    applyLatestPiCapture(result.capture);
+    return true;
+  }, [applyLatestPiCapture]);
+
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const [histData, testData] = await Promise.all([
+      const [histData, testData, latestCapture] = await Promise.all([
         fetchHistoryWithoutOverlap(),
-        fetchTestImages()
+        fetchTestImages(),
+        fetchLatestPiCameraCapture()
       ]);
       if (Array.isArray(histData)) setHistory(histData);
       setTestImages(testData || []);
+      if (latestCapture?.success && latestCapture.capture) {
+        applyLatestPiCapture(latestCapture.capture);
+      } else {
+        setActiveTestImage(null);
+        setAnalysisResult(null);
+      }
       setLoading(false);
     }
     loadData();
-  }, [fetchHistoryWithoutOverlap]);
+  }, [applyLatestPiCapture, fetchHistoryWithoutOverlap]);
 
   // Refresh history every 30 seconds while visible; detections refresh it immediately.
   useEffect(() => {
@@ -155,16 +185,22 @@ export default function CameraPestTab() {
       if (document.visibilityState !== 'visible') return;
       const histData = await fetchHistoryWithoutOverlap();
       if (Array.isArray(histData)) setHistory(histData);
-      if (!activeTestImage) setLiveRefreshKey(Date.now());
     }, 30000);
     return () => clearInterval(interval);
-  }, [activeTestImage, fetchHistoryWithoutOverlap]);
+  }, [fetchHistoryWithoutOverlap]);
 
   // API ghi cả SQLite và Firestore trước khi trả kết quả nên tải lại ngay.
   const refreshHistoryAfterAnalysis = async () => {
     const updatedHist = await fetchHistoryWithoutOverlap();
     if (Array.isArray(updatedHist)) setHistory(updatedHist);
-    setLiveRefreshKey(Date.now());
+  };
+
+  const handleRefreshPreview = async () => {
+    const loaded = await loadLatestPiCapture();
+    if (!loaded) {
+      setActiveTestImage(null);
+      setAnalysisResult(null);
+    }
   };
 
   // Kích hoạt AI phân tích ảnh ngay lập tức
@@ -317,7 +353,6 @@ export default function CameraPestTab() {
         firebase_capture_id: request.request_id,
         capture_source: 'pi_camera'
       });
-      setLiveRefreshKey(Date.now());
     } catch (error) {
       setIsLiveStreamMode(false);
       setCaptureError(error.message || 'Không thể chụp ảnh bằng camera Raspberry Pi.');
@@ -356,9 +391,13 @@ export default function CameraPestTab() {
               Camera & Nhận diện Bệnh AI
             </h2>
             <p className="text-sm text-slate-500">
-              {activeTestImage 
-                ? 'Đang xem ảnh mẫu từ thẻ nhớ' 
-                : 'Luồng camera thời gian thực / Kết quả nhận diện gần nhất'}
+              {isLiveStreamMode
+                ? 'Luồng camera thời gian thực'
+                : analysisResult?.capture_source === 'pi_camera'
+                  ? 'Ảnh nhận diện mới nhất từ camera Pi'
+                  : activeTestImage
+                    ? 'Đang xem ảnh mẫu từ thẻ nhớ'
+                    : 'Chưa có ảnh nhận diện đã lưu'}
             </p>
           </div>
           
@@ -376,10 +415,11 @@ export default function CameraPestTab() {
 
             <button 
               onClick={() => {
-                setIsLiveStreamMode(!isLiveStreamMode);
                 if (isLiveStreamMode) {
-                  // Đang tắt live -> bật live, clear ảnh test
-                  setActiveTestImage(null);
+                  setIsLiveStreamMode(false);
+                  loadLatestPiCapture();
+                } else {
+                  setIsLiveStreamMode(true);
                 }
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 font-bold text-xs rounded-lg border transition-colors shadow-sm ${
@@ -419,12 +459,9 @@ export default function CameraPestTab() {
             />
 
             <button 
-              onClick={() => {
-                setActiveTestImage(null);
-                setRefreshKey(Date.now());
-              }}
+              onClick={handleRefreshPreview}
               className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg border border-slate-200 transition-colors"
-              title="Làm mới"
+              title="Tải lại nhận diện mới nhất"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
@@ -432,7 +469,13 @@ export default function CameraPestTab() {
             <div className="flex items-center gap-2 px-3 py-1 bg-rose-50 text-rose-600 rounded-full border border-rose-200">
               <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
               <span className="text-xs font-bold uppercase tracking-wider">
-                {activeTestImage ? 'TEST VIEW' : 'AI LIVE'}
+                {isLiveStreamMode
+                  ? 'LIVE'
+                  : analysisResult?.capture_source === 'pi_camera'
+                    ? 'PI LATEST'
+                    : activeTestImage
+                      ? 'TEST VIEW'
+                      : 'NO IMAGE'}
               </span>
             </div>
           </div>
@@ -514,18 +557,18 @@ export default function CameraPestTab() {
                   e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
                 }}
               />
-            ) : (
+            ) : activeTestImage ? (
               <img 
-                src={activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`} 
+                src={activeTestImage}
                 alt="AI Detection Feed"
                 draggable={false}
-                onError={(e) => {
-                  if (!activeTestImage) {
-                    e.target.src = "https://images.unsplash.com/photo-1591857177580-dc82b9ac4e1e?q=80&w=1200&auto=format&fit=crop";
-                  }
-                }}
                 className="w-full h-full object-contain bg-slate-950 pointer-events-none"
               />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-slate-950 px-6 text-center text-slate-400">
+                <Camera className="h-9 w-9 opacity-50" />
+                <span className="text-sm">{loading ? 'Đang tải nhận diện mới nhất...' : 'Chưa có ảnh nhận diện đã lưu'}</span>
+              </div>
             )}
           </div>
 
@@ -617,28 +660,31 @@ export default function CameraPestTab() {
             
             <div className="flex items-center gap-2">
               {activeTestImage && (
-                <button 
+                <button
                   onClick={() => {
                     setActiveTestImage(null);
                     setAnalysisResult(null);
+                    setIsLiveStreamMode(true);
                   }}
                   className="px-2.5 py-1 text-xs font-medium bg-white/20 hover:bg-white/30 text-white rounded-lg backdrop-blur-sm transition-colors"
                 >
                   Quay lại Camera
                 </button>
               )}
-              <button 
-                onClick={() => setSelectedImage({
-                  url: activeTestImage || `/latest_detection.jpg?t=${liveRefreshKey}`,
-                  title: analysisResult ? `${analysisResult.pest_type} (${Math.round((analysisResult.confidence || 0) * 100)}%)` : 'Ảnh Camera / Nhận diện gần nhất',
-                  time: new Date().toLocaleString('vi-VN'),
-                  notes: analysisResult?.notes || 'Ảnh từ camera thời gian thực.'
-                })}
-                className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors text-white"
-                title="Phóng to ảnh"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
+              {(activeTestImage || isLiveStreamMode) && (
+                <button
+                  onClick={() => setSelectedImage({
+                    url: isLiveStreamMode ? '/api/camera/stream' : activeTestImage,
+                    title: analysisResult ? `${analysisResult.pest_type} (${Math.round((analysisResult.confidence || 0) * 100)}%)` : 'Ảnh Camera / Nhận diện gần nhất',
+                    time: new Date().toLocaleString('vi-VN'),
+                    notes: analysisResult?.notes || 'Ảnh từ camera thời gian thực.'
+                  })}
+                  className="p-2 hover:bg-white/20 rounded-lg backdrop-blur-sm transition-colors text-white"
+                  title="Phóng to ảnh"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
